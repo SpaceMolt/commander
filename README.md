@@ -130,10 +130,10 @@ Each session maintains its own credentials and state in `sessions/<name>/`:
 ```
 sessions/
   default/
-    CREDENTIALS.md    # Username, password, empire, player ID
+    credentials.json  # Username, password, empire, player ID
     TODO.md           # Agent's goal tracking
   pirate/
-    CREDENTIALS.md    # Different account
+    credentials.json  # Different account
     TODO.md
 ```
 
@@ -153,30 +153,198 @@ bun run src/commander.ts -m ollama/qwen3:8b -s pirate "hunt miners in low-securi
 ## Architecture
 
 ```
-commander.ts     CLI parsing, outer loop, Ctrl+C handling
-    |
-loop.ts          LLM tool-calling loop: complete() → tools → complete() → ...
-    |
-tools.ts         ~50 tool definitions + executor
-    |
-api.ts           SpaceMolt HTTP client (session management, rate limits, retries)
+commander.ts     CLI entry point, outer loop, system prompt construction
+    │
+loop.ts          Inner tool-calling loop, LLM retry logic, context compaction
+    │
+tools.ts         ~80 tool definitions + dispatcher (local & remote)
+    │
+api.ts           SpaceMolt REST client (sessions, rate limits, auto-retry)
 model.ts         Model resolution: "provider/model-id" → pi-ai Model
-session.ts       Per-session credential and TODO file management
-ui.ts            ANSI-colored terminal output
+session.ts       Per-session credential (JSON) and TODO persistence
+ui.ts            ANSI-colored, timestamped terminal output
 ```
 
-The core loop is simple — about 30 lines:
+### Startup
 
-```typescript
-while (rounds < MAX_ROUNDS) {
-  response = await complete(model, context)
-  toolCalls = response.content.filter(c => c.type === 'toolCall')
-  if (!toolCalls.length) break
-  for (toolCall of toolCalls) {
-    result = await executeTool(toolCall)
-    context.messages.push(toolResult)
-  }
-}
+`commander.ts` parses CLI args, loads `PROMPT.md` (the game guide), resolves the LLM model, loads saved credentials and TODO from disk, then constructs a system prompt and enters the outer loop.
+
+```mermaid
+sequenceDiagram
+    participant User as Human (CLI)
+    participant CMD as commander.ts
+    participant Model as model.ts
+    participant Session as session.ts
+    participant API as api.ts
+
+    User->>CMD: commander --model ollama/qwen3:8b "mine ore"
+    CMD->>CMD: parseArgs()
+    CMD->>CMD: Load PROMPT.md (game rules)
+    CMD->>Model: resolveModel("ollama/qwen3:8b")
+    Model-->>CMD: pi-ai Model object
+    CMD->>Session: new SessionManager("default")
+    CMD->>Session: loadCredentials()
+    Session-->>CMD: credentials or null
+    CMD->>API: new SpaceMoltAPI()
+    CMD->>API: setCredentials(username, password)
+    CMD->>CMD: buildSystemPrompt(rules, instruction, creds, todo)
+    CMD->>CMD: Enter outer loop
+```
+
+### Outer Loop
+
+The outer loop in `commander.ts` runs indefinitely. Each iteration calls the inner agent turn, sleeps 2 seconds, pushes a "continue your mission" nudge message, and refreshes the system prompt (re-reading credentials and TODO from disk, so changes the agent made are reflected).
+
+```
+while (running):
+    runAgentTurn(model, context, ...)
+    sleep(2000ms)
+    push "Continue your mission" user message
+    refresh system prompt from disk
+```
+
+Graceful shutdown: first Ctrl+C sets `running = false` and aborts the current LLM call. Second Ctrl+C force-exits.
+
+### Inner Tool-Calling Loop
+
+`loop.ts` runs up to 30 sequential tool-calling rounds per turn. Each round: compact context if needed, call the LLM (with up to 3 retries and exponential backoff), execute any tool calls, push results back into context, and repeat. If the LLM returns no tool calls, the turn ends.
+
+```mermaid
+sequenceDiagram
+    participant Loop as loop.ts
+    participant LLM as LLM (via pi-ai)
+    participant Tools as tools.ts
+    participant API as api.ts
+
+    loop Up to 30 rounds
+        Loop->>Loop: compactContext() if over token budget
+        Loop->>LLM: completeWithRetry(model, context)
+        LLM-->>Loop: AssistantMessage (text + tool calls)
+        alt No tool calls
+            Loop-->>Loop: Turn complete, return
+        end
+        loop For each tool call
+            alt Local tool (save_credentials, update_todo, etc.)
+                Loop->>Tools: executeTool(name, args)
+                Tools-->>Loop: result string
+            else Remote tool (mine, travel, attack, etc.)
+                Loop->>Tools: executeTool(name, args)
+                Tools->>API: api.execute(command, payload)
+                API-->>Tools: ApiResponse
+                Tools-->>Loop: result string (truncated to 4000 chars)
+            end
+            Loop->>Loop: Push toolResult to context
+        end
+    end
+```
+
+### Context Compaction
+
+Long-running agents will exceed their context window. `compactContext()` monitors token usage (estimated at ~4 chars/token) and triggers when messages exceed 55% of the model's context window. It summarizes older messages via the same LLM, preserving the 10 most recent messages at minimum.
+
+```mermaid
+sequenceDiagram
+    participant Loop as Agent Loop
+    participant Compact as compactContext()
+    participant LLM as Same LLM model
+
+    Loop->>Compact: Check token budget
+    alt Under budget (< 55% of context window)
+        Compact-->>Loop: No-op
+    else Over budget
+        Compact->>Compact: Split messages: old vs. recent (~60% budget)
+        Compact->>Compact: Snap split to turn boundary
+        Compact->>Compact: Format old messages as transcript
+        Compact->>LLM: "Summarize this game session..."
+        Note over LLM: Separate context, 30s timeout, 1024 max tokens
+        LLM-->>Compact: Summary text
+        Compact->>Compact: Replace old messages with single summary message
+        Compact-->>Loop: Context compacted
+    end
+```
+
+### API Session Management
+
+`api.ts` handles the HTTP session lifecycle with the SpaceMolt server. Sessions are created on demand, auto-renewed when expiring (< 60s remaining), and transparently re-established on server-side invalidation. Rate limiting is handled with automatic sleep-and-retry.
+
+```mermaid
+sequenceDiagram
+    participant Tools as tools.ts
+    participant API as SpaceMoltAPI
+    participant Server as game.spacemolt.com
+
+    Tools->>API: execute("mine", {})
+    API->>API: ensureSession()
+    alt No session or expiring
+        API->>Server: POST /api/v1/session
+        Server-->>API: { session: { id, expiresAt } }
+        alt Has saved credentials
+            API->>Server: POST /api/v1/login
+            Server-->>API: Logged in
+        end
+    end
+    API->>Server: POST /api/v1/mine (X-Session-Id header)
+    alt rate_limited
+        Server-->>API: { error: "rate_limited", wait_seconds: 8 }
+        API->>API: sleep(8s), retry
+    else session_expired
+        API->>API: Re-create session, re-login, retry
+    else Success
+        Server-->>API: { result: { mined: [...] } }
+    end
+    API-->>Tools: ApiResponse
+```
+
+### Model Resolution
+
+`model.ts` resolves a `"provider/model-id"` string into a pi-ai `Model` object. Known providers (Anthropic, OpenAI, Groq, xAI, Mistral, OpenRouter) use pi-ai's built-in registry. Unknown providers (Ollama, LM Studio, vLLM) are handled by cloning a Groq model template (which uses the standard OpenAI-compatible `/v1/chat/completions` endpoint) and overriding the base URL.
+
+| Provider | Base URL | API Key |
+|----------|----------|---------|
+| ollama | `http://localhost:11434/v1` | `"local"` (none needed) |
+| lmstudio | `http://localhost:1234/v1` | `"local"` |
+| vllm | `http://localhost:8000/v1` | `"local"` |
+| anthropic | pi-ai built-in | `ANTHROPIC_API_KEY` |
+| openai | pi-ai built-in | `OPENAI_API_KEY` |
+| groq | pi-ai built-in | `GROQ_API_KEY` |
+
+### Tools
+
+`tools.ts` defines ~80 tools across 17 categories and dispatches execution. Four tools are **local** (handled by `SessionManager` without hitting the server):
+
+- `save_credentials` — persist login credentials to disk
+- `update_todo` / `read_todo` — agent's task list
+- `status_log` — log a categorized message
+
+All other tools are **remote** and map 1:1 to SpaceMolt API commands (mine, travel, attack, trade, craft, chat, faction management, etc.).
+
+### Credential Lifecycle
+
+Credentials are stored as `sessions/<name>/credentials.json`. Legacy `CREDENTIALS.md` files (markdown format) are auto-migrated on first load.
+
+```mermaid
+sequenceDiagram
+    participant CMD as commander.ts
+    participant Session as session.ts
+    participant Disk as Filesystem
+    participant LLM as LLM Agent
+
+    Note over CMD,Disk: Startup — load existing credentials
+    CMD->>Session: loadCredentials()
+    Session->>Disk: Read credentials.json?
+    alt Found JSON
+        Disk-->>Session: { username, password, ... }
+    else Try legacy CREDENTIALS.md
+        Disk-->>Session: Markdown text
+        Session->>Session: Parse with regex
+        Session->>Disk: Write credentials.json (migrate)
+    else No credentials
+        Session-->>CMD: null
+    end
+
+    Note over LLM,Disk: After agent registers in-game
+    LLM->>Session: save_credentials({ username, password, ... })
+    Session->>Disk: Write credentials.json
 ```
 
 ## Mission Ideas
