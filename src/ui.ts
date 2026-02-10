@@ -45,9 +45,9 @@ export function logTool(name: string, args?: Record<string, unknown>, reason?: s
   const color = COLORS.tool;
   const timestamp = new Date().toLocaleTimeString("en-US", { hour12: false });
   const argsStr = args ? ` ${formatArgs(args)}` : "";
-  const toolPart = `${color}${name}${argsStr}${RESET}`;
+  const toolPart = `${DIM}\x1b[37m${name}${argsStr}${RESET}`;
   if (reason) {
-    console.log(`${DIM}${timestamp}${RESET} ${color}[tool]${RESET} ${reason} ${DIM}— ${toolPart}`);
+    console.log(`${DIM}${timestamp}${RESET} ${color}[tool]${RESET} ${reason} ${DIM}—${RESET} ${toolPart}`);
   } else {
     console.log(`${DIM}${timestamp}${RESET} ${color}[tool]${RESET} ${toolPart}`);
   }
