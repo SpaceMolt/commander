@@ -272,7 +272,9 @@ async function summarizeViaLLM(
   const transcript = formatMessagesForSummary(oldMessages);
 
   let prompt = "Summarize this game session transcript. ";
-  prompt += "Focus on: current location, credits, ship status, cargo, active goals, key events, relationships with other players, and any important discoveries. ";
+  prompt += "Focus on: (1) what the agent was CURRENTLY DOING and what it planned to do next — this is the most important part, ";
+  prompt += "(2) current location, credits, ship status, cargo, ";
+  prompt += "(3) active goals, key events, relationships with other players, and important discoveries. ";
   prompt += "Be concise — bullet points are fine. Preserve all decision-relevant details.\n\n";
 
   if (previousSummary) {
@@ -376,6 +378,73 @@ async function completeWithRetry(
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+// ─── Session handoff ─────────────────────────────────────────
+
+const HANDOFF_TIMEOUT_MS = 20_000;
+const HANDOFF_MAX_MESSAGES = 30;
+
+/**
+ * Generate a brief handoff note from the current context so that a
+ * future session (or post-compaction context) can resume seamlessly.
+ * Returns null if there's not enough context to summarize.
+ */
+export async function generateSessionHandoff(
+  model: Model<any>,
+  context: Context,
+  options?: LoopOptions,
+): Promise<string | null> {
+  // Skip if the agent barely did anything (just the initial user message)
+  if (context.messages.length < 4) return null;
+
+  // Take the most recent messages
+  const recent = context.messages.slice(-HANDOFF_MAX_MESSAGES);
+  const transcript = formatMessagesForSummary(recent);
+
+  const prompt = [
+    "The agent's session is ending. Write a brief handoff note (3-8 bullet points) that a future session can use to resume immediately.",
+    "Include:",
+    "- What the agent was doing RIGHT NOW (mid-action state)",
+    "- Immediate next step it planned to take",
+    "- Current location, ship, credits, cargo highlights",
+    "- Any active goals or ongoing plans",
+    "- Important recent events (combat, trades, discoveries)",
+    "",
+    "Be concise and actionable — this will be read by the next session's agent to pick up where this one left off.",
+    "",
+    "Recent transcript:",
+    transcript,
+  ].join("\n");
+
+  const handoffCtx: Context = {
+    systemPrompt: "You are a concise summarizer. Output only the handoff note, no preamble.",
+    messages: [{ role: "user" as const, content: prompt, timestamp: Date.now() }],
+  };
+
+  const timeoutController = new AbortController();
+  const timeout = setTimeout(() => timeoutController.abort(), HANDOFF_TIMEOUT_MS);
+
+  try {
+    const resp = await complete(model, handoffCtx, {
+      signal: timeoutController.signal,
+      apiKey: options?.apiKey,
+      maxTokens: 512,
+    });
+    clearTimeout(timeout);
+
+    const text = resp.content
+      .filter((b): b is { type: "text"; text: string } => "text" in b)
+      .map((b) => b.text)
+      .join("");
+
+    return text.trim() || null;
+  } catch {
+    clearTimeout(timeout);
+    return null;
+  }
+}
+
+// ─── Utilities ───────────────────────────────────────────────
 
 function combineAbortSignals(...signals: AbortSignal[]): AbortSignal {
   const controller = new AbortController();

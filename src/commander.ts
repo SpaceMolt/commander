@@ -6,7 +6,7 @@ import { SpaceMoltAPI } from "./api.js";
 import { SessionManager } from "./session.js";
 import { localTools } from "./tools.js";
 import { fetchGameTools } from "./schema.js";
-import { runAgentTurn, type CompactionState } from "./loop.js";
+import { runAgentTurn, generateSessionHandoff, type CompactionState } from "./loop.js";
 import { log, logError, setDebug } from "./ui.js";
 
 const PROJECT_ROOT = dirname(dirname(Bun.main));
@@ -278,6 +278,35 @@ async function main(): Promise<void> {
       freshCredsPrompt = credentialsPrompt;
     }
     context.systemPrompt = buildSystemPrompt(promptMd, cliArgs.instruction, freshCredsPrompt, freshTodo);
+  }
+
+  // ─── Session Handoff ────────────────────────────────────────
+  log("system", "Generating session handoff...");
+  try {
+    const handoff = await generateSessionHandoff(model, context, { apiKey });
+    if (handoff) {
+      log("info", `Handoff note:\n${handoff}`);
+
+      // Persist to captain's log (server-side, survives across sessions)
+      try {
+        await api.execute("captains_log_add", {
+          entry: `[Session Handoff] ${handoff}`,
+        });
+        log("system", "Handoff saved to captain's log");
+      } catch {
+        logError("Failed to save handoff to captain's log");
+      }
+
+      // Prepend to TODO (local, read at next startup)
+      const existingTodo = sessionMgr.loadTodo();
+      const todoHandoff = `## Session Handoff (${new Date().toISOString()})\n${handoff}\n\n---\n${existingTodo}`;
+      sessionMgr.saveTodo(todoHandoff);
+      log("system", "Handoff prepended to TODO");
+    } else {
+      log("system", "No handoff generated (session too short)");
+    }
+  } catch (err) {
+    logError(`Handoff failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   log("system", "Agent stopped.");
