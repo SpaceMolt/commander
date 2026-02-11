@@ -76,6 +76,79 @@ function formatArgs(args: Record<string, unknown>): string {
   return parts.join(" ");
 }
 
+/** Parse a single notification into a { tag, category, text } triple. */
+function parseNotification(n: unknown): { tag: string; category: string; text: string } | null {
+  if (typeof n === "string") return { tag: "EVENT", category: "info", text: n };
+  if (typeof n !== "object" || n === null) return null;
+
+  const notif = n as Record<string, unknown>;
+  const type = notif.type as string | undefined;
+  const msgType = notif.msg_type as string | undefined;
+  let data = notif.data as Record<string, unknown> | string | undefined;
+
+  // The HTTP API stores json.RawMessage in Data — if it arrives as a string, parse it
+  if (typeof data === "string") {
+    try { data = JSON.parse(data) as Record<string, unknown>; } catch { /* leave as string */ }
+  }
+
+  // Chat messages
+  if (msgType === "chat_message" && data && typeof data === "object") {
+    const channel = data.channel as string || "?";
+    const sender = data.sender as string || "Unknown";
+    const content = data.content as string || "";
+
+    if (sender === "[ADMIN]") {
+      return { tag: "BROADCAST", category: "broadcast", text: content };
+    } else if (channel === "private") {
+      return { tag: `DM from ${sender}`, category: "dm", text: content };
+    } else {
+      return { tag: `CHAT ${channel.toUpperCase()}`, category: "chat", text: `${sender}: ${content}` };
+    }
+  }
+
+  // System notifications
+  if (type === "system" && data && typeof data === "object") {
+    const message = data.message as string || JSON.stringify(data);
+    return { tag: "SYSTEM", category: "broadcast", text: message };
+  }
+
+  // Tips
+  if (type === "tip" && data && typeof data === "object") {
+    const message = data.message as string || JSON.stringify(data);
+    return { tag: "TIP", category: "system", text: message };
+  }
+
+  // Combat notifications
+  if (type === "combat" && data && typeof data === "object") {
+    const message = (data.message as string) || JSON.stringify(data);
+    return { tag: "COMBAT", category: "combat", text: message };
+  }
+
+  // Trade notifications
+  if (type === "trade" && data && typeof data === "object") {
+    const message = (data.message as string) || JSON.stringify(data);
+    return { tag: "TRADE", category: "trade", text: message };
+  }
+
+  // Ships / scan results
+  if ((type === "scan" || type === "ships" || type === "local") && data && typeof data === "object") {
+    const message = (data.message as string) || JSON.stringify(data);
+    return { tag: type.toUpperCase(), category: "info", text: message };
+  }
+
+  // Catch-all: use whatever fields are available
+  const tag = (type || msgType || "EVENT").toUpperCase();
+  let message: string;
+  if (data && typeof data === "object") {
+    message = (data.message as string) || (data.content as string) || JSON.stringify(data);
+  } else if (typeof data === "string") {
+    message = data;
+  } else {
+    message = (notif.message as string) || (notif.content as string) || JSON.stringify(n);
+  }
+  return { tag, category: "info", text: message };
+}
+
 /**
  * Log chat and system notifications to stdout so the human watching can see them.
  * Called when we receive notifications from the API response.
@@ -84,69 +157,23 @@ export function logNotifications(notifications: unknown[]): void {
   if (!notifications || notifications.length === 0) return;
 
   for (const n of notifications) {
-    if (typeof n !== "object" || n === null) continue;
-    const notif = n as Record<string, unknown>;
-    const type = notif.type as string | undefined;
-    const msgType = notif.msg_type as string | undefined;
-    let data = notif.data as Record<string, unknown> | string | undefined;
-
-    // The HTTP API stores json.RawMessage in Data — if it arrives as a string, parse it
-    if (typeof data === "string") {
-      try { data = JSON.parse(data) as Record<string, unknown>; } catch { /* leave as string */ }
-    }
-
-    if (msgType === "chat_message" && data && typeof data === "object") {
-      const channel = data.channel as string || "?";
-      const sender = data.sender as string || "Unknown";
-      const content = data.content as string || "";
-
-      if (sender === "[ADMIN]") {
-        log("broadcast", `[BROADCAST] ${content}`);
-      } else if (channel === "private") {
-        log("dm", `[DM from ${sender}] ${content}`);
-      } else {
-        const tag = channel.toUpperCase();
-        log("chat", `[${tag}] ${sender}: ${content}`);
-      }
-      continue;
-    }
-
-    // System/tip notifications (gameplay tips, system messages)
-    if ((type === "system" || type === "tip") && data && typeof data === "object") {
-      const message = data.message as string || JSON.stringify(data);
-      log("broadcast", `[SYSTEM] ${message}`);
-      continue;
-    }
-
-    // Combat notifications
-    if (type === "combat" && data && typeof data === "object") {
-      log("combat", `[COMBAT] ${data.message || JSON.stringify(data)}`);
-      continue;
-    }
-
-    // Trade notifications
-    if (type === "trade" && data && typeof data === "object") {
-      log("trade", `[TRADE] ${data.message || JSON.stringify(data)}`);
-      continue;
-    }
-
-    // Catch-all: log any other notification type so nothing is silently dropped
-    logDebug(`[notif type=${type} msg_type=${msgType}] ${JSON.stringify(data)}`);
+    const parsed = parseNotification(n);
+    if (!parsed) continue;
+    log(parsed.category, `[${parsed.tag}] ${parsed.text}`);
   }
 }
 
+/**
+ * Format notifications into readable text for inclusion in the LLM prompt.
+ * Uses the same parsing as logNotifications so the agent sees properly structured events.
+ */
 export function formatNotifications(notifications: unknown[]): string {
   if (!notifications || notifications.length === 0) return "";
   const lines: string[] = [];
   for (const n of notifications) {
-    if (typeof n === "string") {
-      lines.push(`  > ${n}`);
-    } else if (typeof n === "object" && n !== null) {
-      const notif = n as Record<string, unknown>;
-      const type = notif.type || "event";
-      const msg = notif.message || notif.content || JSON.stringify(n);
-      lines.push(`  > [${type}] ${msg}`);
-    }
+    const parsed = parseNotification(n);
+    if (!parsed) continue;
+    lines.push(`  > [${parsed.tag}] ${parsed.text}`);
   }
   return lines.join("\n");
 }

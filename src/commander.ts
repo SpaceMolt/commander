@@ -7,7 +7,7 @@ import { SessionManager } from "./session.js";
 import { localTools } from "./tools.js";
 import { fetchGameTools } from "./schema.js";
 import { runAgentTurn, generateSessionHandoff, type CompactionState } from "./loop.js";
-import { log, logError, setDebug } from "./ui.js";
+import { log, logError, setDebug, logNotifications, formatNotifications } from "./ui.js";
 
 const PROJECT_ROOT = dirname(dirname(Bun.main));
 const TURN_INTERVAL = 2000; // ms between turns
@@ -254,11 +254,30 @@ async function main(): Promise<void> {
     // Brief pause between turns
     await sleep(TURN_INTERVAL);
 
+    // Poll for pending server events (chats, combat, broadcasts, etc.) that
+    // arrived while the LLM was thinking.  get_status is an unlimited query
+    // and always returns piggybacked notifications.
+    let pendingEvents = "";
+    try {
+      const pollResp = await api.execute("get_status");
+      if (pollResp.notifications && Array.isArray(pollResp.notifications) && pollResp.notifications.length > 0) {
+        logNotifications(pollResp.notifications);
+        pendingEvents = formatNotifications(pollResp.notifications);
+      }
+    } catch {
+      // Polling is best-effort; don't break the loop
+    }
+
     // Add a continuation nudge so the LLM always has a user message to respond to.
     // Without this, the last message is an assistant message and many models return empty.
+    const nudgeParts: string[] = [];
+    if (pendingEvents) {
+      nudgeParts.push("## Events Since Last Action\n" + pendingEvents + "\n");
+    }
+    nudgeParts.push("Continue your mission. Take the next action using tools. Do NOT ask for information you already have — check the system prompt for your credentials and TODO list.");
     context.messages.push({
       role: "user" as const,
-      content: "Continue your mission. Take the next action using tools. Do NOT ask for information you already have — check the system prompt for your credentials and TODO list.",
+      content: nudgeParts.join("\n"),
       timestamp: Date.now(),
     });
 
