@@ -150,6 +150,8 @@ export class SpaceMoltAPI {
       headers["X-Session-Id"] = this.session.id;
     }
 
+    // fetch() only throws on network errors (DNS, connection refused, etc.)
+    // Any HTTP response — even 4xx/5xx — means the server is reachable.
     const resp = await fetch(url, {
       method: "POST",
       headers,
@@ -163,11 +165,16 @@ export class SpaceMoltAPI {
       };
     }
 
-    if (!resp.ok && resp.status !== 400 && resp.status !== 429) {
-      throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+    // Try to parse JSON for any status code. If the server returned an HTTP
+    // response (even an error), the connection is fine — don't throw.
+    try {
+      return (await resp.json()) as ApiResponse;
+    } catch {
+      // Non-JSON response (e.g. HTML error page, empty body)
+      return {
+        error: { code: "http_error", message: `HTTP ${resp.status}: ${resp.statusText}` },
+      };
     }
-
-    return (await resp.json()) as ApiResponse;
   }
 }
 
