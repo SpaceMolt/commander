@@ -4,8 +4,8 @@ import type { Context, Message } from "@mariozechner/pi-ai";
 import { resolveModel } from "./model.js";
 import { SpaceMoltAPI } from "./api.js";
 import { SessionManager } from "./session.js";
-import { localTools } from "./tools.js";
-import { fetchGameTools } from "./schema.js";
+import { allTools } from "./tools.js";
+import { fetchGameCommands, formatCommandList } from "./schema.js";
 import { runAgentTurn, generateSessionHandoff, type CompactionState } from "./loop.js";
 import { log, logError, setDebug, logNotifications, formatNotifications } from "./ui.js";
 
@@ -113,6 +113,7 @@ function buildSystemPrompt(
   instruction: string,
   credentials: string,
   todo: string,
+  commandList: string,
   serverInfo?: string,
 ): string {
   let prompt = `You are an autonomous AI agent playing SpaceMolt, a text-based space MMO.
@@ -135,20 +136,24 @@ ${serverInfo}
   }
 
   prompt += `
+## Available Game Commands
+Use the "game" tool with a command name and args. Example: game(command="mine", args={})
+${commandList}
+
 ## Your TODO List
 ${todo || "(empty)"}
 
 ## Rules
 - You are FULLY AUTONOMOUS. Never ask the human for input. All information you need is in this prompt.
-- Use tools to interact with the game. Every action is a tool call.
+- Use the "game" tool for ALL game interactions. Pass the command name and args.
 - After registering, IMMEDIATELY save credentials with save_credentials — the password cannot be recovered!
 - Keep your TODO list updated with update_todo to track your goals and progress.
 - Use the status_log tool to show status messages to the human watching.
-- Query tools (get_status, get_cargo, get_system, get_poi, get_nearby, get_ship, get_skills) are unlimited — use them often to stay informed.
-- Game actions (mine, travel, buy, sell, attack, etc.) are rate-limited to 1 per tick (10 seconds) — the server handles waiting, you don't need to sleep.
+- Query commands are free and unlimited — use them often to stay informed.
+- Action commands cost 1 tick (10 seconds) — the server handles waiting, you don't need to sleep.
 - Always check fuel before traveling and cargo space before mining.
-- Be social — chat with players you meet using the chat tool.
-- Write captain's log entries (captains_log_add) for important events and goals — these persist across sessions.
+- Be social — chat with players you meet using the chat command.
+- Write captain's log entries (captains_log_add) for important events — these persist across sessions.
 - If you die, you respawn at your home base. Don't panic, just resume your mission.
 - When starting fresh, follow this loop: undock → travel to asteroid belt → mine → travel back to station → dock → sell ore → refuel → repeat.
 `;
@@ -157,6 +162,52 @@ ${todo || "(empty)"}
 
 // ─── Initial Server Info ─────────────────────────────────────
 
+function formatStatusMarkdown(result: Record<string, unknown>): string {
+  const p = (result.player || {}) as Record<string, unknown>;
+  const s = (result.ship || {}) as Record<string, unknown>;
+  const stats = (p.stats || {}) as Record<string, unknown>;
+  const skills = (p.skills || {}) as Record<string, unknown>;
+
+  const lines: string[] = [];
+
+  // Player summary line
+  const loc = p.docked_at_base
+    ? `${p.current_system} > ${p.current_poi} (docked at ${p.docked_at_base})`
+    : `${p.current_system} > ${p.current_poi}`;
+  lines.push(`**Player:** ${p.username} (${p.empire}) | ${Number(p.credits || 0).toLocaleString()} credits | ${loc}`);
+  if (p.faction_id) lines.push(`**Faction:** ${p.faction_id} (${p.faction_rank || "member"})`);
+
+  // Ship summary
+  lines.push(`**Ship:** ${s.class_id || "unknown"} "${s.name || ""}" | Hull: ${s.hull}/${s.max_hull} | Shield: ${s.shield}/${s.max_shield} | Fuel: ${s.fuel}/${s.max_fuel}`);
+  lines.push(`**Cargo:** ${s.cargo_used}/${s.cargo_capacity} | CPU: ${s.cpu_used}/${s.cpu_capacity} | Power: ${s.power_used}/${s.power_capacity}`);
+
+  // Modules
+  const modules = s.modules as string[] | undefined;
+  if (modules && modules.length > 0) {
+    lines.push(`**Modules:** ${modules.join(", ")}`);
+  }
+
+  // Cargo items
+  const cargo = s.cargo as Array<{ item_id: string; quantity: number }> | undefined;
+  if (cargo && cargo.length > 0) {
+    lines.push(`**Cargo items:** ${cargo.map(c => `${c.item_id}: ${c.quantity}`).join(", ")}`);
+  }
+
+  // Skills (compact)
+  const skillEntries = Object.entries(skills);
+  if (skillEntries.length > 0) {
+    lines.push(`**Skills:** ${skillEntries.map(([k, v]) => `${k}: ${v}`).join(", ")}`);
+  }
+
+  // Stats (compact, only non-zero)
+  const statEntries = Object.entries(stats).filter(([, v]) => v && v !== 0);
+  if (statEntries.length > 0) {
+    lines.push(`**Stats:** ${statEntries.map(([k, v]) => `${k}: ${v}`).join(", ")}`);
+  }
+
+  return lines.join("\n");
+}
+
 async function fetchInitialServerInfo(api: SpaceMoltAPI): Promise<string> {
   const parts: string[] = [];
 
@@ -164,10 +215,23 @@ async function fetchInitialServerInfo(api: SpaceMoltAPI): Promise<string> {
   try {
     const statusResp = await api.execute("get_status");
     if (!statusResp.error && statusResp.result) {
-      parts.push("### Ship Status (from server)\n```json\n" + JSON.stringify(statusResp.result, null, 2) + "\n```");
+      parts.push("### Ship Status\n" + formatStatusMarkdown(statusResp.result as Record<string, unknown>));
     }
   } catch {
     // Non-fatal — agent can query status itself
+  }
+
+  // Fetch most recent captain's log entry only
+  try {
+    const logResp = await api.execute("captains_log_get", { index: 0 });
+    if (!logResp.error && logResp.result) {
+      const entry = logResp.result as Record<string, unknown>;
+      if (entry.entry) {
+        parts.push(`### Last Captain's Log (${entry.created_at || "unknown date"})\n${entry.entry}`);
+      }
+    }
+  } catch {
+    // Non-fatal
   }
 
   // Fetch version/release notes
@@ -175,8 +239,8 @@ async function fetchInitialServerInfo(api: SpaceMoltAPI): Promise<string> {
     const versionResp = await api.execute("get_version");
     if (!versionResp.error && versionResp.result) {
       const v = versionResp.result as Record<string, unknown>;
-      const notes = Array.isArray(v.release_notes) ? v.release_notes.map((n: string) => `  - ${n}`).join("\n") : "";
-      parts.push(`### Game Version\nVersion: ${v.version || "unknown"} (${v.release_date || ""})\n${notes ? "Release Notes:\n" + notes : ""}`);
+      const notes = Array.isArray(v.notes) ? v.notes.map((n: string) => `- ${n}`).join("\n") : "";
+      parts.push(`### Game Version\nv${v.version || "?"} (${v.release_date || "?"})\n${notes}`);
     }
   } catch {
     // Non-fatal
@@ -238,11 +302,11 @@ async function main(): Promise<void> {
   // Load TODO
   const todo = sessionMgr.loadTodo();
 
-  // Fetch game tools from OpenAPI spec
-  log("setup", "Fetching game tools from server...");
-  const remoteTools = await fetchGameTools(api.baseUrl);
-  const allTools = [...localTools, ...remoteTools];
-  log("setup", `Tools loaded: ${remoteTools.length} remote + ${localTools.length} local = ${allTools.length} total`);
+  // Fetch game command list from OpenAPI spec
+  log("setup", "Fetching game commands from server...");
+  const gameCommands = await fetchGameCommands(api.baseUrl);
+  const commandList = formatCommandList(gameCommands);
+  log("setup", `${gameCommands.length} game commands loaded (${allTools.length} tools: game + ${allTools.length - 1} local)`);
 
   // Fetch initial server state (ship status, release notes) if we have credentials
   let serverInfo = "";
@@ -255,7 +319,7 @@ async function main(): Promise<void> {
   }
 
   // Build initial context
-  const systemPrompt = buildSystemPrompt(promptMd, cliArgs.instruction, credentialsPrompt, todo, serverInfo);
+  const systemPrompt = buildSystemPrompt(promptMd, cliArgs.instruction, credentialsPrompt, todo, commandList, serverInfo);
 
   const context: Context = {
     systemPrompt,
@@ -353,7 +417,7 @@ async function main(): Promise<void> {
     } else {
       freshCredsPrompt = credentialsPrompt;
     }
-    context.systemPrompt = buildSystemPrompt(promptMd, cliArgs.instruction, freshCredsPrompt, freshTodo, serverInfo);
+    context.systemPrompt = buildSystemPrompt(promptMd, cliArgs.instruction, freshCredsPrompt, freshTodo, commandList, serverInfo);
   }
 
   // ─── Session Handoff ────────────────────────────────────────

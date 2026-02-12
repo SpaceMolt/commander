@@ -1,12 +1,17 @@
-import type { Tool } from "@mariozechner/pi-ai";
 import { log, logError } from "./ui.js";
 
+export interface GameCommandInfo {
+  name: string;
+  description: string;
+  isMutation: boolean;
+}
+
 /**
- * Fetch the OpenAPI spec from the gameserver and convert each path
- * into a pi-ai Tool definition. This keeps tool definitions always
- * in sync with the server without manual maintenance.
+ * Fetch the OpenAPI spec from the gameserver and extract command names
+ * and short descriptions. Returns a compact summary instead of full
+ * tool schemas to save tokens.
  */
-export async function fetchGameTools(baseUrl: string): Promise<Tool[]> {
+export async function fetchGameCommands(baseUrl: string): Promise<GameCommandInfo[]> {
   // baseUrl is like https://game.spacemolt.com/api/v1
   // OpenAPI spec is at   https://game.spacemolt.com/api/openapi.json
   const specUrl = baseUrl.replace(/\/v\d+\/?$/, "/openapi.json");
@@ -18,12 +23,12 @@ export async function fetchGameTools(baseUrl: string): Promise<Tool[]> {
     spec = await resp.json();
   } catch (err) {
     logError(`Failed to fetch OpenAPI spec from ${specUrl}: ${err instanceof Error ? err.message : err}`);
-    log("system", "Falling back to empty remote tool list — agent can use get_commands at runtime");
+    log("system", "Falling back to empty command list — agent can use get_commands at runtime");
     return [];
   }
 
   const paths: Record<string, any> = spec.paths ?? {};
-  const tools: Tool[] = [];
+  const commands: GameCommandInfo[] = [];
 
   for (const [path, methods] of Object.entries(paths)) {
     const op = methods?.post;
@@ -35,17 +40,30 @@ export async function fetchGameTools(baseUrl: string): Promise<Tool[]> {
     // Skip /session — handled internally by api.ts
     if (name === "createSession" || path === "/session") continue;
 
-    // Build description: summary + mutation/query indicator
     const isMutation = !!op["x-is-mutation"];
-    const desc = `${op.summary || name} [${isMutation ? "mutation" : "query"}]`;
+    const description = op.summary || name;
 
-    // Extract requestBody JSON Schema or default to empty object
-    const bodySchema = op.requestBody?.content?.["application/json"]?.schema;
-    const parameters = bodySchema ?? { type: "object", properties: {} };
-
-    tools.push({ name, description: desc, parameters });
+    commands.push({ name, description, isMutation });
   }
 
-  log("system", `Loaded ${tools.length} game tools from OpenAPI spec`);
-  return tools;
+  log("system", `Loaded ${commands.length} game commands from OpenAPI spec`);
+  return commands;
+}
+
+/**
+ * Format commands as a compact pipe-separated list for the system prompt.
+ * Queries and mutations are separated for clarity.
+ */
+export function formatCommandList(commands: GameCommandInfo[]): string {
+  const queries = commands.filter(c => !c.isMutation).map(c => c.name);
+  const mutations = commands.filter(c => c.isMutation).map(c => c.name);
+
+  const lines: string[] = [];
+  if (queries.length > 0) {
+    lines.push(`Query commands (free, no tick cost): ${queries.join("|")}`);
+  }
+  if (mutations.length > 0) {
+    lines.push(`Action commands (costs 1 tick): ${mutations.join("|")}`);
+  }
+  return lines.join("\n");
 }

@@ -377,7 +377,74 @@ export function formatToolResult(name: string, result: unknown, notifications?: 
   if (typeof result === "string") {
     parts.push(result);
   } else {
-    parts.push(JSON.stringify(result, null, 2));
+    parts.push(jsonToYaml(result));
   }
   return parts.join("\n");
+}
+
+// ─── JSON → YAML (lightweight, no dependencies) ─────────────
+
+export function jsonToYaml(value: unknown, indent: number = 0): string {
+  const pad = "  ".repeat(indent);
+
+  if (value === null || value === undefined) return `${pad}~`;
+  if (typeof value === "boolean") return `${pad}${value}`;
+  if (typeof value === "number") return `${pad}${value}`;
+  if (typeof value === "string") {
+    // Quote strings that could be misread as YAML special values
+    if (
+      value === "" ||
+      value === "true" || value === "false" ||
+      value === "null" || value === "~" ||
+      value.includes("\n") ||
+      value.includes(": ") ||
+      value.startsWith("{") || value.startsWith("[") ||
+      value.startsWith("'") || value.startsWith('"') ||
+      value.startsWith("#") ||
+      /^[\d.e+-]+$/i.test(value)
+    ) {
+      return `${pad}"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
+    }
+    return `${pad}${value}`;
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return `${pad}[]`;
+    // Compact arrays of scalars on one line
+    if (value.every(v => v === null || typeof v !== "object")) {
+      const items = value.map(v => {
+        if (typeof v === "string") return `"${v.replace(/"/g, '\\"')}"`;
+        return String(v ?? "~");
+      });
+      const oneLine = `${pad}[${items.join(", ")}]`;
+      if (oneLine.length < 120) return oneLine;
+    }
+    const lines: string[] = [];
+    for (const item of value) {
+      if (item !== null && typeof item === "object") {
+        const nested = jsonToYaml(item, indent + 1).trimStart();
+        lines.push(`${pad}- ${nested}`);
+      } else {
+        lines.push(`${pad}- ${jsonToYaml(item, 0).trimStart()}`);
+      }
+    }
+    return lines.join("\n");
+  }
+
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return `${pad}{}`;
+    const lines: string[] = [];
+    for (const [key, val] of entries) {
+      if (val !== null && typeof val === "object") {
+        lines.push(`${pad}${key}:`);
+        lines.push(jsonToYaml(val, indent + 1));
+      } else {
+        lines.push(`${pad}${key}: ${jsonToYaml(val, 0).trimStart()}`);
+      }
+    }
+    return lines.join("\n");
+  }
+
+  return `${pad}${String(value)}`;
 }

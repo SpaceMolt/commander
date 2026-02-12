@@ -4,9 +4,17 @@ import type { SpaceMoltAPI } from "./api.js";
 import type { SessionManager } from "./session.js";
 import { log, logTool, logDebug, formatToolResult, logNotifications } from "./ui.js";
 
-// ─── Local Tool Definitions ─────────────────────────────────
+// ─── Tool Definitions ────────────────────────────────────────
 
-export const localTools: Tool[] = [
+export const allTools: Tool[] = [
+  {
+    name: "game",
+    description: "Execute a SpaceMolt game command. See the system prompt for available commands.",
+    parameters: Type.Object({
+      command: Type.String({ description: "The game command name (e.g. mine, travel, get_status)" }),
+      args: Type.Optional(Type.Record(Type.String(), Type.Any(), { description: "Command arguments as key-value pairs" })),
+    }),
+  },
   {
     name: "save_credentials",
     description: "Save your login credentials locally. Do this IMMEDIATELY after registering!",
@@ -54,16 +62,30 @@ export async function executeTool(
   session: SessionManager,
   reason?: string,
 ): Promise<string> {
-  logTool(name, args, reason);
-
   // Handle local tools
   if (LOCAL_TOOLS.has(name)) {
+    logTool(name, args, reason);
     return executeLocalTool(name, args, session);
   }
 
-  // Execute API tool
+  // Handle the `game` wrapper tool — extract command + args
+  let command: string;
+  let commandArgs: Record<string, unknown> | undefined;
+  if (name === "game") {
+    command = String(args.command || "");
+    commandArgs = args.args as Record<string, unknown> | undefined;
+    if (!command) return "Error: missing 'command' argument";
+  } else {
+    // Fallback: if the LLM somehow calls a tool by direct name
+    command = name;
+    commandArgs = Object.keys(args).length > 0 ? args : undefined;
+  }
+
+  logTool(command, commandArgs, reason);
+
+  // Execute API command
   try {
-    const resp = await api.execute(name, Object.keys(args).length > 0 ? args : undefined);
+    const resp = await api.execute(command, commandArgs && Object.keys(commandArgs).length > 0 ? commandArgs : undefined);
 
     // Log chat/system notifications to stdout for the human watching
     if (resp.notifications && Array.isArray(resp.notifications) && resp.notifications.length > 0) {
@@ -75,10 +97,10 @@ export async function executeTool(
       return `Error: [${resp.error.code}] ${resp.error.message}`;
     }
 
-    return truncateResult(formatToolResult(name, resp.result, resp.notifications));
+    return truncateResult(formatToolResult(command, resp.result, resp.notifications));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return `Error executing ${name}: ${msg}`;
+    return `Error executing ${command}: ${msg}`;
   }
 }
 
