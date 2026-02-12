@@ -3,7 +3,7 @@ import type { Model, Context, AssistantMessage, ToolCall, Message } from "@mario
 import type { SpaceMoltAPI } from "./api.js";
 import type { SessionManager } from "./session.js";
 import { executeTool } from "./tools.js";
-import { log, logAgent, logDebug, logError, logLLMInput, logLLMOutput } from "./ui.js";
+import { log, logAgent, logDebug, logError, logLLMInput, logLLMOutput, logLLMPayload, logToolResultDebug, isDebug } from "./ui.js";
 
 const MAX_TOOL_ROUNDS = 30;
 const MAX_RETRIES = 3;
@@ -104,13 +104,16 @@ export async function runAgentTurn(
       const callReason = !showedReason ? reason : undefined;
       showedReason = true;
       const result = await executeTool(toolCall.name, toolCall.arguments, api, session, callReason);
+      const isError = result.startsWith("Error");
+
+      logToolResultDebug(toolCall.name, toolCall.id, result, isError);
 
       const toolResultMessage: Message = {
         role: "toolResult",
         toolCallId: toolCall.id,
         toolName: toolCall.name,
         content: [{ type: "text", text: result }],
-        isError: result.startsWith("Error"),
+        isError,
         timestamp: Date.now(),
       };
 
@@ -342,6 +345,7 @@ async function completeWithRetry(
           signal,
           apiKey: options?.apiKey,
           maxTokens: 4096,
+          onPayload: isDebug() ? (payload: unknown) => logLLMPayload(payload) : undefined,
         });
         clearTimeout(timeout);
 

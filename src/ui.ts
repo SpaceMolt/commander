@@ -43,81 +43,189 @@ export function logDebug(message: string): void {
   log("system", message);
 }
 
-const DEBUG_SEP = "━".repeat(80);
-const DEBUG_COLOR = "\x1b[93m"; // bright yellow
+// ─── Debug colors & separators ──────────────────────────────
+
+const C = {
+  yellow:  "\x1b[93m",  // bright yellow
+  cyan:    "\x1b[96m",  // bright cyan
+  green:   "\x1b[92m",  // bright green
+  magenta: "\x1b[95m",  // bright magenta
+  blue:    "\x1b[94m",  // bright blue
+  red:     "\x1b[91m",  // bright red
+  white:   "\x1b[97m",  // bright white
+  gray:    "\x1b[90m",  // gray
+};
+
+const SEP_HEAVY = "━".repeat(100);
+const SEP_LIGHT = "─".repeat(100);
+const SEP_DOT   = "┄".repeat(100);
+
+function debugHeader(color: string, icon: string, title: string, subtitle?: string): void {
+  console.log(`\n${color}${SEP_HEAVY}${RESET}`);
+  console.log(`${color}${BOLD}  ${icon}  ${title}${RESET}${subtitle ? `  ${DIM}${subtitle}${RESET}` : ""}`);
+  console.log(`${color}${SEP_HEAVY}${RESET}`);
+}
+
+function debugSection(color: string, label: string, meta?: string): void {
+  console.log(`\n${color}${SEP_LIGHT}${RESET}`);
+  console.log(`${color}${BOLD}  ${label}${RESET}${meta ? `  ${DIM}${meta}${RESET}` : ""}`);
+  console.log(`${color}${SEP_LIGHT}${RESET}`);
+}
+
+function debugSub(color: string, label: string, meta?: string): void {
+  console.log(`${color}${SEP_DOT}${RESET}`);
+  console.log(`${color}  ${label}${RESET}${meta ? `  ${DIM}${meta}${RESET}` : ""}`);
+  console.log(`${color}${SEP_DOT}${RESET}`);
+}
+
+function debugFooter(color: string): void {
+  console.log(`${color}${SEP_HEAVY}${RESET}\n`);
+}
+
+// ─── LLM payload (raw outgoing request body) ────────────────
+
+export function logLLMPayload(payload: unknown): void {
+  if (!debugEnabled) return;
+  debugSection(C.gray, "RAW REQUEST PAYLOAD");
+  console.log(JSON.stringify(payload, null, 2));
+}
+
+// ─── LLM input (system prompt + messages) ───────────────────
 
 export function logLLMInput(systemPrompt: string | undefined, messages: Array<{ role: string; content: unknown }>): void {
   if (!debugEnabled) return;
-  console.log(`\n${DEBUG_COLOR}${DEBUG_SEP}${RESET}`);
-  console.log(`${DEBUG_COLOR}${BOLD}  ▶ LLM INPUT${RESET}`);
-  console.log(`${DEBUG_COLOR}${DEBUG_SEP}${RESET}`);
 
-  // System prompt (truncate to first/last 500 chars if huge)
+  const totalChars = (systemPrompt?.length || 0) + messages.reduce((sum, m) => {
+    if (typeof m.content === "string") return sum + m.content.length;
+    if (Array.isArray(m.content)) {
+      for (const b of m.content) {
+        if ("text" in b) sum += ((b as any).text || "").length;
+        if ("thinking" in b) sum += ((b as any).thinking || "").length;
+        if ("name" in b) sum += JSON.stringify((b as any).arguments || {}).length;
+      }
+    }
+    return sum;
+  }, 0);
+
+  debugHeader(C.yellow, "▶", "LLM INPUT", `${messages.length} messages, ~${totalChars} chars`);
+
+  // System prompt — full, no truncation
   const sp = systemPrompt || "(none)";
-  console.log(`\n${BOLD}[SYSTEM PROMPT]${RESET} ${DIM}(${sp.length} chars)${RESET}`);
-  if (sp.length > 1500) {
-    console.log(sp.slice(0, 750));
-    console.log(`${DIM}... (${sp.length - 1500} chars omitted) ...${RESET}`);
-    console.log(sp.slice(-750));
-  } else {
-    console.log(sp);
-  }
+  debugSection(C.blue, "SYSTEM PROMPT", `${sp.length} chars`);
+  console.log(sp);
 
-  // Messages
-  console.log(`\n${BOLD}[MESSAGES]${RESET} ${DIM}(${messages.length} messages)${RESET}`);
-  for (const msg of messages) {
+  // Messages — each gets its own sub-separator
+  debugSection(C.cyan, "MESSAGES", `${messages.length} total`);
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
     const role = msg.role.toUpperCase();
+    const roleColor = role === "USER" ? C.green : role === "ASSISTANT" ? C.magenta : C.gray;
+
     if (typeof msg.content === "string") {
-      const content = msg.content.length > 2000
-        ? msg.content.slice(0, 1000) + `\n${DIM}... (${msg.content.length - 2000} chars omitted) ...${RESET}\n` + msg.content.slice(-1000)
-        : msg.content;
-      console.log(`\n  ${BOLD}[${role}]${RESET}\n${content}`);
+      debugSub(roleColor, `[${i}] ${role}`, `${msg.content.length} chars`);
+      console.log(msg.content);
     } else if (Array.isArray(msg.content)) {
-      console.log(`\n  ${BOLD}[${role}]${RESET}`);
+      debugSub(roleColor, `[${i}] ${role}`, `${msg.content.length} blocks`);
       for (const block of msg.content) {
         if ("text" in block && (block as any).text) {
           const text = (block as any).text;
-          const truncated = text.length > 1000
-            ? text.slice(0, 500) + `\n${DIM}... (${text.length - 1000} chars omitted) ...${RESET}\n` + text.slice(-500)
-            : text;
-          console.log(`    [text] ${truncated}`);
+          console.log(`\n  ${BOLD}[text]${RESET} ${DIM}(${text.length} chars)${RESET}`);
+          console.log(text);
         } else if ("name" in block) {
-          console.log(`    [toolCall] ${(block as any).name}(${JSON.stringify((block as any).arguments)})`);
+          const args = JSON.stringify((block as any).arguments, null, 2);
+          console.log(`\n  ${BOLD}[toolCall]${RESET} ${(block as any).name}`);
+          console.log(args);
         } else if ("thinking" in block && (block as any).thinking) {
           const thinking = (block as any).thinking;
-          const truncated = thinking.length > 500
-            ? thinking.slice(0, 250) + `\n${DIM}... (${thinking.length - 500} chars omitted) ...${RESET}\n` + thinking.slice(-250)
-            : thinking;
-          console.log(`    [thinking] ${truncated}`);
+          console.log(`\n  ${BOLD}[thinking]${RESET} ${DIM}(${thinking.length} chars)${RESET}`);
+          console.log(thinking);
         }
       }
     }
   }
-  console.log(`\n${DEBUG_COLOR}${DEBUG_SEP}${RESET}\n`);
+
+  debugFooter(C.yellow);
 }
 
-export function logLLMOutput(response: { content: Array<any>; stopReason?: string; usage?: any }): void {
-  if (!debugEnabled) return;
-  console.log(`\n${DEBUG_COLOR}${DEBUG_SEP}${RESET}`);
-  console.log(`${DEBUG_COLOR}${BOLD}  ◀ LLM OUTPUT${RESET}  ${DIM}stop=${response.stopReason || "?"} tokens=${response.usage?.totalTokens ?? "?"}${RESET}`);
-  console.log(`${DEBUG_COLOR}${DEBUG_SEP}${RESET}`);
+// ─── LLM output (full response + metadata) ──────────────────
 
-  for (const block of response.content) {
+export function logLLMOutput(response: {
+  content: Array<any>;
+  stopReason?: string;
+  usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; totalTokens: number; cost?: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number } };
+  provider?: string;
+  model?: string;
+  api?: string;
+  errorMessage?: string;
+  timestamp?: number;
+}): void {
+  if (!debugEnabled) return;
+
+  debugHeader(C.green, "◀", "LLM OUTPUT", `stop=${response.stopReason || "?"}`);
+
+  // Metadata
+  debugSection(C.blue, "METADATA");
+  const meta: string[] = [];
+  if (response.provider) meta.push(`  provider:  ${response.provider}`);
+  if (response.model)    meta.push(`  model:     ${response.model}`);
+  if (response.api)      meta.push(`  api:       ${response.api}`);
+  meta.push(`  stop:      ${response.stopReason || "?"}`);
+  if (response.errorMessage) meta.push(`  ${C.red}error:     ${response.errorMessage}${RESET}`);
+  if (response.timestamp) meta.push(`  timestamp: ${new Date(response.timestamp).toISOString()}`);
+  console.log(meta.join("\n"));
+
+  // Usage / tokens
+  if (response.usage) {
+    const u = response.usage;
+    debugSection(C.magenta, "TOKEN USAGE");
+    const lines = [
+      `  input:       ${u.input.toLocaleString()} tokens`,
+      `  output:      ${u.output.toLocaleString()} tokens`,
+      `  cache read:  ${u.cacheRead.toLocaleString()} tokens`,
+      `  cache write: ${u.cacheWrite.toLocaleString()} tokens`,
+      `  ${BOLD}total:       ${u.totalTokens.toLocaleString()} tokens${RESET}`,
+    ];
+    if (u.cost) {
+      lines.push("");
+      lines.push(`  cost input:       $${u.cost.input.toFixed(6)}`);
+      lines.push(`  cost output:      $${u.cost.output.toFixed(6)}`);
+      lines.push(`  cost cache read:  $${u.cost.cacheRead.toFixed(6)}`);
+      lines.push(`  cost cache write: $${u.cost.cacheWrite.toFixed(6)}`);
+      lines.push(`  ${BOLD}cost total:         $${u.cost.total.toFixed(6)}${RESET}`);
+    }
+    console.log(lines.join("\n"));
+  }
+
+  // Content blocks — full, no truncation
+  debugSection(C.cyan, "CONTENT", `${response.content.length} blocks`);
+
+  for (let i = 0; i < response.content.length; i++) {
+    const block = response.content[i];
+
     if ("text" in block && block.text) {
-      console.log(`\n  ${BOLD}[text]${RESET}\n${block.text}`);
+      debugSub(C.white, `[${i}] text`, `${block.text.length} chars`);
+      console.log(block.text);
     } else if ("name" in block) {
       const argsStr = JSON.stringify(block.arguments, null, 2);
-      console.log(`\n  ${BOLD}[toolCall]${RESET} ${block.name}`);
-      console.log(`  ${DIM}args:${RESET} ${argsStr}`);
+      debugSub(C.yellow, `[${i}] toolCall: ${block.name}`, `id=${block.id || "?"}`);
+      console.log(argsStr);
     } else if ("thinking" in block && block.thinking) {
-      const thinking = block.thinking;
-      const truncated = thinking.length > 1000
-        ? thinking.slice(0, 500) + `\n${DIM}... (${thinking.length - 1000} chars omitted) ...${RESET}\n` + thinking.slice(-500)
-        : thinking;
-      console.log(`\n  ${BOLD}[thinking]${RESET}\n${truncated}`);
+      debugSub(C.gray, `[${i}] thinking`, `${block.thinking.length} chars`);
+      console.log(block.thinking);
     }
   }
-  console.log(`\n${DEBUG_COLOR}${DEBUG_SEP}${RESET}\n`);
+
+  debugFooter(C.green);
+}
+
+// ─── Tool result debug logging ──────────────────────────────
+
+export function logToolResultDebug(toolName: string, toolCallId: string, result: string, isError: boolean): void {
+  if (!debugEnabled) return;
+  const color = isError ? C.red : C.gray;
+  debugSub(color, `TOOL RESULT: ${toolName}`, `id=${toolCallId}, ${result.length} chars${isError ? " [ERROR]" : ""}`);
+  console.log(result);
 }
 
 export function logError(message: string): void {
