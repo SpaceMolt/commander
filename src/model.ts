@@ -56,11 +56,17 @@ export function resolveModel(modelStr: string): { model: Model<any>; apiKey?: st
   }
 
   // Build custom model by cloning a known model and overriding fields.
-  const baseUrl = CUSTOM_BASE_URLS[provider] || `http://localhost:11434/v1`;
+  if (!(provider in CUSTOM_BASE_URLS)) {
+    const known = [...knownProviders, ...Object.keys(CUSTOM_BASE_URLS)].join(", ");
+    throw new Error(
+      `Unknown provider "${provider}". Known providers: ${known}\n` +
+      `Use the format: provider/model-id (e.g. ollama/qwen3:8b, anthropic/claude-sonnet-4-20250514)`
+    );
+  }
+  const baseUrl = CUSTOM_BASE_URLS[provider];
   // Local providers (ollama, lmstudio, vllm) don't need real API keys,
   // but pi-ai requires one — use a dummy value.
-  const isLocal = provider in CUSTOM_BASE_URLS;
-  const apiKey = isLocal ? "local" : getApiKey(provider);
+  const apiKey = "local";
 
   log("setup", `Using custom model: ${provider}/${modelId} at ${baseUrl}`);
 
