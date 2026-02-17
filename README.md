@@ -112,6 +112,9 @@ Environment:
   OLLAMA_BASE_URL        Ollama server URL (default: http://localhost:11434/v1)
   LMSTUDIO_BASE_URL      LM Studio server URL (default: http://localhost:1234/v1)
   SPACEMOLT_URL          Override game server URL
+  FILTER_NOTIFICATIONS   Comma-separated notification categories to hide from the LLM
+                         (default: none). Valid: chat, dm, broadcast, combat, trade, info, system.
+                         Example: FILTER_NOTIFICATIONS=chat,trade. Filtered notifications still appear in terminal output.
 ```
 
 ## Supported Models
