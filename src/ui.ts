@@ -22,6 +22,19 @@ const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
 const DIM = "\x1b[2m";
 
+/**
+ * Notification categories to filter from the LLM context (still logged to stdout).
+ * Set via FILTER_NOTIFICATIONS env var as a comma-separated list of categories.
+ * Valid categories: chat, dm, broadcast, combat, trade, info, system
+ * Default: none (all notifications forwarded to the LLM)
+ */
+const FILTERED_CATEGORIES: Set<string> = new Set(
+  (process.env.FILTER_NOTIFICATIONS ?? "")
+    .split(",")
+    .map(s => s.trim())
+    .filter(Boolean)
+);
+
 let debugEnabled = false;
 
 export function setDebug(enabled: boolean): void {
@@ -362,6 +375,7 @@ export function formatNotifications(notifications: unknown[]): string {
   for (const n of notifications) {
     const parsed = parseNotification(n);
     if (!parsed) continue;
+    if (FILTERED_CATEGORIES.has(parsed.category)) continue;
     lines.push(`  > [${parsed.tag}] ${parsed.text}`);
   }
   return lines.join("\n");
