@@ -54,6 +54,11 @@ export async function runAgentTurn(
       response = await completeWithRetry(model, context, options);
     } catch (err) {
       logError(`LLM call failed: ${err instanceof Error ? err.message : String(err)}`);
+      if (isDebug() && err instanceof Error) {
+        if (err.cause) logError(`  cause: ${err.cause instanceof Error ? err.cause.message : String(err.cause)}`);
+        if ((err as any).status) logError(`  status: ${(err as any).status}`);
+        logError(`  stack: ${err.stack}`);
+      }
       return;
     }
 
@@ -372,6 +377,14 @@ async function completeWithRetry(
 
       const delay = RETRY_BASE_DELAY * Math.pow(2, attempt);
       logError(`LLM error (attempt ${attempt + 1}/${MAX_RETRIES}): ${lastError.message}`);
+      if (isDebug()) {
+        if (lastError.cause) logError(`  cause: ${lastError.cause instanceof Error ? lastError.cause.message : String(lastError.cause)}`);
+        if ((lastError as any).status) logError(`  status: ${(lastError as any).status}`);
+        if ((lastError as any).response) {
+          try { logError(`  response: ${JSON.stringify((lastError as any).response)}`); } catch {}
+        }
+        logError(`  stack: ${lastError.stack}`);
+      }
       log("wait", `Retrying in ${delay / 1000}s...`);
       await sleep(delay);
     }
