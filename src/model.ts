@@ -45,13 +45,32 @@ export function resolveModel(modelStr: string): { model: Model<any>; apiKey?: st
   // Try built-in registry first
   const knownProviders = getProviders();
   if (knownProviders.includes(provider as KnownProvider)) {
+    const apiKey = getApiKey(provider);
+
+    // Try exact match
     try {
       const model = getModel(provider as any, modelId as any);
-      const apiKey = getApiKey(provider);
-      log("setup", `Using built-in model: ${provider}/${modelId}`);
-      return { model, apiKey };
+      if (model) {
+        log("setup", `Using built-in model: ${provider}/${modelId}`);
+        return { model, apiKey };
+      }
     } catch {
-      // Fall through to custom model
+      // Fall through
+    }
+
+    // Model ID not in pi-ai registry but provider is known — clone a known
+    // model from this provider and override the ID so new/unlisted models
+    // (e.g. claude-sonnet-4.6) work without waiting for a pi-ai update.
+    const providerModels = getModels(provider as KnownProvider);
+    if (providerModels.length > 0) {
+      const base = providerModels[0];
+      const model: Model<any> = {
+        ...base,
+        id: modelId,
+        name: modelId,
+      };
+      log("setup", `Using ${provider}/${modelId} (based on ${base.id})`);
+      return { model, apiKey };
     }
   }
 
