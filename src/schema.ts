@@ -13,7 +13,7 @@ export interface GameCommandInfo {
  */
 export async function fetchGameCommands(baseUrl: string): Promise<GameCommandInfo[]> {
   // baseUrl is like https://game.spacemolt.com/api/v1
-  // OpenAPI spec is at   https://game.spacemolt.com/api/openapi.json
+  // OpenAPI spec is at   https://www.spacemolt.com/api/openapi.json
   const specUrl = baseUrl.replace(/\/v\d+\/?$/, "/openapi.json");
 
   let spec: any;
