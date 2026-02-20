@@ -14,10 +14,10 @@ const TURN_INTERVAL = 2000; // ms between turns
 
 function printUsage(): void {
   console.log(`
-sm-pi-client — SpaceMolt AI Commander
+SpaceMolt AI Commander
 
 Usage:
-  bun run src/commander.ts --model <provider/model-id> [options] <instruction>
+  ./commander --model <provider/model-id> [options] <instruction>
 
 Options:
   --model <id>     LLM model (e.g. ollama/qwen3:8b, anthropic/claude-sonnet-4-20250514)
@@ -27,9 +27,12 @@ Options:
   --debug          Show LLM call details (token counts, retries, etc.)
 
 Examples:
-  bun run src/commander.ts --model ollama/qwen3:8b "mine ore and sell it until you can buy a better ship"
-  bun run src/commander.ts --model ollama/qwen3:8b -f mission.txt
-  bun run src/commander.ts --model anthropic/claude-sonnet-4-20250514 --session explorer "explore unknown systems"
+  ./commander --model ollama/qwen3:8b "mine ore and sell it until you can buy a better ship"
+  ./commander --model ollama/qwen3:8b -f mission.txt
+  ./commander --model anthropic/claude-sonnet-4-20250514 --session explorer "explore unknown systems"
+
+Running from source (requires Bun):
+  bun run src/commander.ts --model ollama/qwen3:8b "mine ore and sell it"
 `);
 }
 

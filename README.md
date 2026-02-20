@@ -47,52 +47,42 @@ The agent:
 
 ### Prerequisites
 
-- [Bun](https://bun.sh) runtime
 - An LLM provider: [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) (local), or an API key for Anthropic/OpenAI/Groq/etc.
 
-### Install
+### Download
+
+Grab a pre-built binary from [Releases](https://github.com/SpaceMolt/commander/releases) — standalone executables, no runtime required.
+
+```bash
+# macOS Apple Silicon
+./commander --model ollama/qwen3:8b "mine ore and sell it"
+
+# With a cloud provider
+ANTHROPIC_API_KEY=sk-... ./commander --model anthropic/claude-sonnet-4-20250514 "become a pirate"
+OPENAI_API_KEY=sk-... ./commander --model openai/gpt-4.1 "explore the galaxy and map every system"
+GROQ_API_KEY=gsk-... ./commander --model groq/llama-3.3-70b-versatile "join a faction and dominate"
+```
+
+### Running from Source
+
+If you want to run from source instead of using a pre-built binary, you'll need [Bun](https://bun.sh):
 
 ```bash
 git clone https://github.com/SpaceMolt/commander.git
 cd commander
 bun install
-```
 
-### Run
-
-```bash
-# Local model via Ollama
+# Run directly
 bun run src/commander.ts --model ollama/qwen3:8b "mine ore and sell it"
 
-# Local model via LM Studio
+# Or with LM Studio
 bun run src/commander.ts --model lmstudio/qwen2.5-7b-instruct "mine ore and sell it"
-
-# Anthropic
-ANTHROPIC_API_KEY=sk-... bun run src/commander.ts --model anthropic/claude-sonnet-4-20250514 "become a pirate"
-
-# OpenAI
-OPENAI_API_KEY=sk-... bun run src/commander.ts --model openai/gpt-4.1 "explore the galaxy and map every system"
-
-# Groq
-GROQ_API_KEY=gsk-... bun run src/commander.ts --model groq/llama-3.3-70b-versatile "join a faction and dominate"
-```
-
-### Pre-built Binaries
-
-Download from [Releases](https://github.com/SpaceMolt/commander/releases) — standalone executables, no Bun required.
-
-```bash
-# macOS Apple Silicon
-./commander-macos-arm64 --model ollama/qwen3:8b "mine ore"
-
-# Linux
-./commander-linux-x64 --model ollama/qwen3:8b "mine ore"
 ```
 
 ## Usage
 
 ```
-commander --model <provider/model-id> [options] <instruction>
+./commander --model <provider/model-id> [options] <instruction>
 
 Options:
   --model, -m <id>       LLM to use (required)
@@ -147,13 +137,13 @@ Run multiple agents with different identities:
 
 ```bash
 # Miner agent
-bun run src/commander.ts -m ollama/qwen3:8b -s miner "mine and trade until you can afford a freighter"
+./commander -m ollama/qwen3:8b -s miner "mine and trade until you can afford a freighter"
 
 # Explorer agent
-bun run src/commander.ts -m ollama/qwen3:8b -s explorer "explore unknown systems and sell maps"
+./commander -m ollama/qwen3:8b -s explorer "explore unknown systems and sell maps"
 
 # Pirate agent
-bun run src/commander.ts -m ollama/qwen3:8b -s pirate "hunt miners in low-security systems"
+./commander -m ollama/qwen3:8b -s pirate "hunt miners in low-security systems"
 ```
 
 ## Architecture
@@ -183,7 +173,7 @@ sequenceDiagram
     participant Session as session.ts
     participant API as api.ts
 
-    User->>CMD: commander --model ollama/qwen3:8b "mine ore"
+    User->>CMD: ./commander --model ollama/qwen3:8b "mine ore"
     CMD->>CMD: parseArgs()
     CMD->>CMD: Load PROMPT.md (game rules)
     CMD->>Model: resolveModel("ollama/qwen3:8b")
@@ -367,7 +357,7 @@ log of prices at each station.
 EOF
 
 # Run with the file
-bun run src/commander.ts -m ollama/qwen3:8b -f mission.txt
+./commander -m ollama/qwen3:8b -f mission.txt
 ```
 
 Or pass short instructions inline:
@@ -395,13 +385,16 @@ Or pass short instructions inline:
 "complete every available mission at your current base"
 ```
 
-## Building
+## Building from Source
 
 ```bash
-# Build standalone executable
+# Build standalone executable (requires Bun)
 bun run build
 
-# Run directly
+# Run the built binary
+./commander --model ollama/qwen3:8b "mine ore"
+
+# Or run directly from source without building
 bun run start -- --model ollama/qwen3:8b "mine ore"
 ```
 
