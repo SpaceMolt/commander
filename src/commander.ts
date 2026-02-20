@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import type { Context, Message } from "@mariozechner/pi-ai";
 import { resolveModel } from "./model.js";
@@ -8,8 +8,14 @@ import { allTools } from "./tools.js";
 import { fetchGameCommands, formatCommandList } from "./schema.js";
 import { runAgentTurn, generateSessionHandoff, type CompactionState } from "./loop.js";
 import { log, logError, setDebug, logNotifications, formatNotifications } from "./ui.js";
+import DEFAULT_PROMPT from "../prompt.md" with { type: "text" };
 
-const PROJECT_ROOT = dirname(dirname(Bun.main));
+// When running from source (bun run src/commander.ts), Bun.main is the .ts file
+// so dirname(dirname) correctly gives the repo root.
+// When running as a compiled binary, Bun.main is the binary itself,
+// so we only need dirname once to get the containing directory.
+const isSource = Bun.main.endsWith(".ts") || Bun.main.endsWith(".js");
+const PROJECT_ROOT = isSource ? dirname(dirname(Bun.main)) : dirname(Bun.main);
 const TURN_INTERVAL = 2000; // ms between turns
 
 function printUsage(): void {
@@ -269,13 +275,14 @@ async function main(): Promise<void> {
   log("setup", `Session: ${cliArgs.session}`);
   log("setup", `Instruction: ${cliArgs.instruction}`);
 
-  // Load PROMPT.md
+  // Load prompt: try external file first (for user customization), then use built-in default
   let promptMd: string;
-  try {
-    promptMd = readFileSync(join(PROJECT_ROOT, "PROMPT.md"), "utf-8");
-  } catch {
-    logError("PROMPT.md not found in project root. Create it with gameplay instructions.");
-    process.exit(1);
+  const promptPath = join(PROJECT_ROOT, "prompt.md");
+  if (existsSync(promptPath)) {
+    promptMd = readFileSync(promptPath, "utf-8");
+    log("setup", "Loaded custom prompt.md");
+  } else {
+    promptMd = DEFAULT_PROMPT;
   }
 
   // Resolve model
