@@ -1,5 +1,5 @@
 import { readFileSync, existsSync } from "fs";
-import { join, dirname } from "path";
+import { join } from "path";
 import type { Context, Message } from "@mariozechner/pi-ai";
 import { resolveModel } from "./model.js";
 import { SpaceMoltAPI } from "./api.js";
@@ -8,14 +8,13 @@ import { allTools } from "./tools.js";
 import { fetchGameCommands, formatCommandList } from "./schema.js";
 import { runAgentTurn, generateSessionHandoff, type CompactionState } from "./loop.js";
 import { log, logError, setDebug, logNotifications, formatNotifications } from "./ui.js";
+import { resolveProjectRoot } from "./paths.js";
 import DEFAULT_PROMPT from "../prompt.md" with { type: "text" };
 
-// When running from source (bun run src/commander.ts), Bun.main is the .ts file
-// so dirname(dirname) correctly gives the repo root.
-// When running as a compiled binary, Bun.main is the binary itself,
-// so we only need dirname once to get the containing directory.
-const isSource = Bun.main.endsWith(".ts") || Bun.main.endsWith(".js");
-const PROJECT_ROOT = isSource ? dirname(dirname(Bun.main)) : dirname(Bun.main);
+// Resolve project root safely. In compiled binaries on Windows, Bun.main may
+// return a virtual path like "/" which breaks path resolution. resolveProjectRoot
+// handles this by preferring process.execPath and falling back to process.cwd().
+const PROJECT_ROOT = resolveProjectRoot(Bun.main, process.execPath, process.cwd());
 const TURN_INTERVAL = 2000; // ms between turns
 
 function printUsage(): void {
