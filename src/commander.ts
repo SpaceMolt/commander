@@ -31,6 +31,10 @@ Examples:
   ./commander --model ollama/qwen3:8b -f mission.txt
   ./commander --model anthropic/claude-sonnet-4-20250514 --session explorer "explore unknown systems"
 
+Custom OpenAI-compatible endpoint:
+  OPENAI_COMPAT_BASE_URL=https://my-server/v1 OPENAI_COMPAT_API_KEY=sk-... \\
+    ./commander --model custom/my-model "mine ore"
+
 Running from source (requires Bun):
   bun run src/commander.ts --model ollama/qwen3:8b "mine ore and sell it"
 `);

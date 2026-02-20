@@ -75,17 +75,30 @@ export function resolveModel(modelStr: string): { model: Model<any>; apiKey?: st
   }
 
   // Build custom model by cloning a known model and overriding fields.
-  if (!(provider in CUSTOM_BASE_URLS)) {
-    const known = [...knownProviders, ...Object.keys(CUSTOM_BASE_URLS)].join(", ");
-    throw new Error(
-      `Unknown provider "${provider}". Known providers: ${known}\n` +
-      `Use the format: provider/model-id (e.g. ollama/qwen3:8b, anthropic/claude-sonnet-4-20250514)`
-    );
+  // Known local providers use their default URLs; unknown providers can
+  // supply OPENAI_COMPAT_BASE_URL + OPENAI_COMPAT_API_KEY env vars.
+  let baseUrl = CUSTOM_BASE_URLS[provider];
+  let apiKey: string;
+
+  if (baseUrl) {
+    // Known local provider (ollama, lmstudio, vllm) — no real API key needed
+    apiKey = "local";
+  } else {
+    // Unknown provider — try env vars for a custom OpenAI-compatible endpoint
+    const envBase = process.env.OPENAI_COMPAT_BASE_URL || process.env[`${provider.toUpperCase()}_BASE_URL`];
+    const envKey = process.env.OPENAI_COMPAT_API_KEY || process.env[`${provider.toUpperCase()}_API_KEY`];
+    if (envBase) {
+      baseUrl = envBase;
+      apiKey = envKey || "local";
+    } else {
+      const known = [...knownProviders, ...Object.keys(CUSTOM_BASE_URLS)].join(", ");
+      throw new Error(
+        `Unknown provider "${provider}". Known providers: ${known}\n` +
+        `For a custom OpenAI-compatible endpoint, set OPENAI_COMPAT_BASE_URL and OPENAI_COMPAT_API_KEY env vars.\n` +
+        `Example: OPENAI_COMPAT_BASE_URL=https://my-server/v1 OPENAI_COMPAT_API_KEY=sk-... commander --model custom/my-model "play"`
+      );
+    }
   }
-  const baseUrl = CUSTOM_BASE_URLS[provider];
-  // Local providers (ollama, lmstudio, vllm) don't need real API keys,
-  // but pi-ai requires one — use a dummy value.
-  const apiKey = "local";
 
   log("setup", `Using custom model: ${provider}/${modelId} at ${baseUrl}`);
 

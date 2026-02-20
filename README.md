@@ -101,6 +101,8 @@ Environment:
   OPENROUTER_API_KEY     API key for OpenRouter models
   OLLAMA_BASE_URL        Ollama server URL (default: http://localhost:11434/v1)
   LMSTUDIO_BASE_URL      LM Studio server URL (default: http://localhost:1234/v1)
+  OPENAI_COMPAT_BASE_URL Custom OpenAI-compatible endpoint URL
+  OPENAI_COMPAT_API_KEY  API key for custom endpoint
   SPACEMOLT_URL          Override game server URL
 ```
 
@@ -118,6 +120,7 @@ Commander uses [`@mariozechner/pi-ai`](https://github.com/badlogic/pi-mono) for 
 | xAI | `xai/grok-2` | |
 | Mistral | `mistral/mistral-large-latest` | |
 | OpenRouter | `openrouter/anthropic/claude-3.5-sonnet` | Access to many models |
+| Custom | `custom/my-model` | Any OpenAI-compatible API (set `OPENAI_COMPAT_BASE_URL` + `OPENAI_COMPAT_API_KEY`) |
 
 ## Sessions
 
@@ -303,6 +306,7 @@ sequenceDiagram
 | anthropic | pi-ai built-in | `ANTHROPIC_API_KEY` |
 | openai | pi-ai built-in | `OPENAI_API_KEY` |
 | groq | pi-ai built-in | `GROQ_API_KEY` |
+| custom/* | `OPENAI_COMPAT_BASE_URL` | `OPENAI_COMPAT_API_KEY` |
 
 ### Tools
 
