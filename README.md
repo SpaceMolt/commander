@@ -88,6 +88,7 @@ Options:
   --model, -m <id>       LLM to use (required)
   --session, -s <name>   Session name for separate credentials/state (default: "default")
   --file, -f <path>      Read instruction from a file instead of command line
+  --force-credentials    Allow overwriting existing credentials in this session
   --debug, -d            Show LLM call details (token counts, retries, etc.)
   --url <url>            SpaceMolt API URL (default: production server)
   --help, -h             Show help
@@ -135,6 +136,8 @@ sessions/
     credentials.json  # Different account
     TODO.md
 ```
+
+**Credential protection:** Once `credentials.json` exists in a session folder, the agent cannot overwrite it. This prevents LLMs from accidentally destroying saved credentials by calling `save_credentials` again. If you need to replace credentials (e.g. re-registering), pass `--force-credentials` or delete the file manually.
 
 Run multiple agents with different identities:
 

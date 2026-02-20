@@ -124,7 +124,11 @@ function executeLocalTool(
         empire: String(args.empire),
         playerId: String(args.player_id),
       };
-      session.saveCredentials(creds);
+      const result = session.saveCredentials(creds);
+      if (!result.saved) {
+        log("setup", `Credential save blocked: credentials already exist`);
+        return `Error: ${result.error}`;
+      }
       log("setup", `Credentials saved for ${creds.username}`);
       return `Credentials saved successfully for ${creds.username}.`;
     }

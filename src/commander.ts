@@ -30,6 +30,7 @@ Options:
   --session <name> Session name for credentials/state (default: "default")
   --url <url>      SpaceMolt API URL (default: production server)
   --file <path>    Read instruction from a file instead of command line
+  --force-credentials  Allow overwriting existing credentials in this session
   --debug          Show LLM call details (token counts, retries, etc.)
 
 Examples:
@@ -53,6 +54,7 @@ interface CLIArgs {
   session: string;
   url?: string;
   debug: boolean;
+  forceCredentials: boolean;
   instruction: string;
 }
 
@@ -63,6 +65,7 @@ function parseArgs(argv: string[]): CLIArgs | null {
   let url: string | undefined;
   let file: string | undefined;
   let debug = false;
+  let forceCredentials = false;
   const positional: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
@@ -85,6 +88,9 @@ function parseArgs(argv: string[]): CLIArgs | null {
       case "--debug":
       case "-d":
         debug = true;
+        break;
+      case "--force-credentials":
+        forceCredentials = true;
         break;
       case "--help":
       case "-h":
@@ -116,7 +122,7 @@ function parseArgs(argv: string[]): CLIArgs | null {
     return null;
   }
 
-  return { model, session, url, debug, instruction };
+  return { model, session, url, debug, forceCredentials, instruction };
 }
 
 // ─── System Prompt Builder ───────────────────────────────────
@@ -289,7 +295,7 @@ async function main(): Promise<void> {
   const { model, apiKey } = resolveModel(cliArgs.model);
 
   // Create session manager
-  const sessionMgr = new SessionManager(cliArgs.session, PROJECT_ROOT);
+  const sessionMgr = new SessionManager(cliArgs.session, PROJECT_ROOT, cliArgs.forceCredentials);
 
   // Create API client
   const api = new SpaceMoltAPI(cliArgs.url);

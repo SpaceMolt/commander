@@ -13,8 +13,10 @@ export class SessionManager {
   private credentialsPath: string;
   private legacyCredentialsPath: string;
   private todoPath: string;
+  private allowCredentialOverwrite: boolean;
 
-  constructor(sessionName: string, baseDir: string) {
+  constructor(sessionName: string, baseDir: string, allowCredentialOverwrite = false) {
+    this.allowCredentialOverwrite = allowCredentialOverwrite;
     this.dir = join(baseDir, "sessions", sessionName);
     this.credentialsPath = join(this.dir, "credentials.json");
     this.legacyCredentialsPath = join(this.dir, "CREDENTIALS.md");
@@ -66,12 +68,19 @@ export class SessionManager {
     return { username, password, empire, playerId };
   }
 
-  saveCredentials(creds: Credentials): void {
+  saveCredentials(creds: Credentials): { saved: boolean; error?: string } {
+    if (existsSync(this.credentialsPath) && !this.allowCredentialOverwrite) {
+      return {
+        saved: false,
+        error: `Credentials already exist at ${this.credentialsPath}. Refusing to overwrite. Use --force-credentials to allow overwriting.`,
+      };
+    }
     writeFileSync(
       this.credentialsPath,
       JSON.stringify(creds, null, 2) + "\n",
       "utf-8"
     );
+    return { saved: true };
   }
 
   loadTodo(): string {
