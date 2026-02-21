@@ -61,6 +61,9 @@ Grab a pre-built binary from [Releases](https://github.com/SpaceMolt/commander/r
 ANTHROPIC_API_KEY=sk-... ./commander --model anthropic/claude-sonnet-4-20250514 "become a pirate"
 OPENAI_API_KEY=sk-... ./commander --model openai/gpt-4.1 "explore the galaxy and map every system"
 GROQ_API_KEY=gsk-... ./commander --model groq/llama-3.3-70b-versatile "join a faction and dominate"
+
+# Free via OpenRouter (no credits needed!)
+OPENROUTER_API_KEY=sk-or-... ./commander --model openrouter/free "mine ore and sell it"
 ```
 
 ### Running from Source
@@ -121,6 +124,8 @@ Commander uses [`@mariozechner/pi-ai`](https://github.com/badlogic/pi-mono) for 
 | xAI | `xai/grok-2` | |
 | Mistral | `mistral/mistral-large-latest` | |
 | OpenRouter | `openrouter/anthropic/claude-3.5-sonnet` | Access to many models |
+| OpenRouter (free) | `openrouter/free` | Auto-picks from free models (no credits needed) |
+| OpenRouter (auto) | `openrouter/auto` | Auto-picks the best model for your prompt |
 | Custom | `custom/my-model` | Any OpenAI-compatible API (set `OPENAI_COMPAT_BASE_URL` + `OPENAI_COMPAT_API_KEY`) |
 
 ## Sessions

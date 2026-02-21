@@ -37,6 +37,9 @@ Examples:
   ./commander --model ollama/qwen3:8b -f mission.txt
   ./commander --model anthropic/claude-sonnet-4-20250514 --session explorer "explore unknown systems"
 
+Free via OpenRouter (no credits needed):
+  OPENROUTER_API_KEY=sk-or-... ./commander --model openrouter/free "mine ore"
+
 Custom OpenAI-compatible endpoint:
   OPENAI_COMPAT_BASE_URL=https://my-server/v1 OPENAI_COMPAT_API_KEY=sk-... \\
     ./commander --model custom/my-model "mine ore"

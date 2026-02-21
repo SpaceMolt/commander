@@ -40,7 +40,16 @@ const API_KEY_ENV: Record<string, string> = {
 };
 
 export function resolveModel(modelStr: string): { model: Model<any>; apiKey?: string } {
-  const { provider, modelId } = parseModelString(modelStr);
+  const { provider, modelId: rawModelId } = parseModelString(modelStr);
+
+  // OpenRouter model IDs are always "provider/model" (e.g. "anthropic/claude-3.5-sonnet").
+  // OpenRouter's own meta-models use the prefix "openrouter/" (e.g. "openrouter/auto",
+  // "openrouter/free"). When a user types "openrouter/auto", parseModelString splits on
+  // the first "/" giving modelId="auto", but pi-ai registers them as "openrouter/auto".
+  // Fix: if provider is "openrouter" and modelId has no "/", prefix with "openrouter/".
+  const modelId = provider === "openrouter" && !rawModelId.includes("/")
+    ? `openrouter/${rawModelId}`
+    : rawModelId;
 
   // Try built-in registry first
   const knownProviders = getProviders();
