@@ -18,7 +18,7 @@ export async function fetchGameCommands(baseUrl: string): Promise<GameCommandInf
 
   let spec: any;
   try {
-    const resp = await fetch(specUrl);
+    const resp = await fetch(specUrl, { headers: { 'User-Agent': 'SpaceMolt-Commander' } });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     spec = await resp.json();
   } catch (err) {
