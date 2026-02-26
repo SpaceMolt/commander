@@ -23,15 +23,44 @@ const BOLD = "\x1b[1m";
 const DIM = "\x1b[2m";
 
 let debugEnabled = false;
+let sanitizeEnabled = true;
+const sensitiveValues = new Set<string>();
 
 export function setDebug(enabled: boolean): void {
   debugEnabled = enabled;
 }
 
+export function setSanitize(enabled: boolean): void {
+  sanitizeEnabled = enabled;
+}
+
+export function addSensitiveValue(value: string): void {
+  if (value && value.length >= 8) {
+    sensitiveValues.add(value);
+  }
+}
+
+function sanitize(text: string): string {
+  if (!sanitizeEnabled) return text;
+  let result = text;
+  for (const value of sensitiveValues) {
+    result = result.replaceAll(value, "[REDACTED]");
+  }
+  // Catch any 64-char hex strings (256-bit passwords/tokens)
+  result = result.replace(/\b[0-9a-f]{64}\b/gi, "[REDACTED]");
+  return result;
+}
+
+/** Sanitization-aware console.log wrapper. */
+function out(...args: unknown[]): void {
+  const sanitized = args.map(a => typeof a === "string" ? sanitize(a) : a);
+  console.log(...sanitized);
+}
+
 export function log(category: string, message: string): void {
   const color = COLORS[category] || COLORS.info;
   const timestamp = new Date().toLocaleTimeString("en-US", { hour12: false });
-  console.log(`${DIM}${timestamp}${RESET} ${color}[${category}]${RESET} ${message}`);
+  out(`${DIM}${timestamp}${RESET} ${color}[${category}]${RESET} ${message}`);
 }
 
 export function isDebug(): boolean {
@@ -61,25 +90,25 @@ const SEP_LIGHT = "─".repeat(100);
 const SEP_DOT   = "┄".repeat(100);
 
 function debugHeader(color: string, icon: string, title: string, subtitle?: string): void {
-  console.log(`\n${color}${SEP_HEAVY}${RESET}`);
-  console.log(`${color}${BOLD}  ${icon}  ${title}${RESET}${subtitle ? `  ${DIM}${subtitle}${RESET}` : ""}`);
-  console.log(`${color}${SEP_HEAVY}${RESET}`);
+  out(`\n${color}${SEP_HEAVY}${RESET}`);
+  out(`${color}${BOLD}  ${icon}  ${title}${RESET}${subtitle ? `  ${DIM}${subtitle}${RESET}` : ""}`);
+  out(`${color}${SEP_HEAVY}${RESET}`);
 }
 
 function debugSection(color: string, label: string, meta?: string): void {
-  console.log(`\n${color}${SEP_LIGHT}${RESET}`);
-  console.log(`${color}${BOLD}  ${label}${RESET}${meta ? `  ${DIM}${meta}${RESET}` : ""}`);
-  console.log(`${color}${SEP_LIGHT}${RESET}`);
+  out(`\n${color}${SEP_LIGHT}${RESET}`);
+  out(`${color}${BOLD}  ${label}${RESET}${meta ? `  ${DIM}${meta}${RESET}` : ""}`);
+  out(`${color}${SEP_LIGHT}${RESET}`);
 }
 
 function debugSub(color: string, label: string, meta?: string): void {
-  console.log(`${color}${SEP_DOT}${RESET}`);
-  console.log(`${color}  ${label}${RESET}${meta ? `  ${DIM}${meta}${RESET}` : ""}`);
-  console.log(`${color}${SEP_DOT}${RESET}`);
+  out(`${color}${SEP_DOT}${RESET}`);
+  out(`${color}  ${label}${RESET}${meta ? `  ${DIM}${meta}${RESET}` : ""}`);
+  out(`${color}${SEP_DOT}${RESET}`);
 }
 
 function debugFooter(color: string): void {
-  console.log(`${color}${SEP_HEAVY}${RESET}\n`);
+  out(`${color}${SEP_HEAVY}${RESET}\n`);
 }
 
 // ─── LLM payload (raw outgoing request body) ────────────────
@@ -87,7 +116,7 @@ function debugFooter(color: string): void {
 export function logLLMPayload(payload: unknown): void {
   if (!debugEnabled) return;
   debugSection(C.gray, "RAW REQUEST PAYLOAD");
-  console.log(JSON.stringify(payload, null, 2));
+  out(JSON.stringify(payload, null, 2));
 }
 
 // ─── LLM input (system prompt + messages) ───────────────────
@@ -112,7 +141,7 @@ export function logLLMInput(systemPrompt: string | undefined, messages: Array<{ 
   // System prompt — full, no truncation
   const sp = systemPrompt || "(none)";
   debugSection(C.blue, "SYSTEM PROMPT", `${sp.length} chars`);
-  console.log(sp);
+  out(sp);
 
   // Messages — each gets its own sub-separator
   debugSection(C.cyan, "MESSAGES", `${messages.length} total`);
@@ -124,22 +153,22 @@ export function logLLMInput(systemPrompt: string | undefined, messages: Array<{ 
 
     if (typeof msg.content === "string") {
       debugSub(roleColor, `[${i}] ${role}`, `${msg.content.length} chars`);
-      console.log(msg.content);
+      out(msg.content);
     } else if (Array.isArray(msg.content)) {
       debugSub(roleColor, `[${i}] ${role}`, `${msg.content.length} blocks`);
       for (const block of msg.content) {
         if ("text" in block && (block as any).text) {
           const text = (block as any).text;
-          console.log(`\n  ${BOLD}[text]${RESET} ${DIM}(${text.length} chars)${RESET}`);
-          console.log(text);
+          out(`\n  ${BOLD}[text]${RESET} ${DIM}(${text.length} chars)${RESET}`);
+          out(text);
         } else if ("name" in block) {
           const args = JSON.stringify((block as any).arguments, null, 2);
-          console.log(`\n  ${BOLD}[toolCall]${RESET} ${(block as any).name}`);
-          console.log(args);
+          out(`\n  ${BOLD}[toolCall]${RESET} ${(block as any).name}`);
+          out(args);
         } else if ("thinking" in block && (block as any).thinking) {
           const thinking = (block as any).thinking;
-          console.log(`\n  ${BOLD}[thinking]${RESET} ${DIM}(${thinking.length} chars)${RESET}`);
-          console.log(thinking);
+          out(`\n  ${BOLD}[thinking]${RESET} ${DIM}(${thinking.length} chars)${RESET}`);
+          out(thinking);
         }
       }
     }
@@ -173,7 +202,7 @@ export function logLLMOutput(response: {
   meta.push(`  stop:      ${response.stopReason || "?"}`);
   if (response.errorMessage) meta.push(`  ${C.red}error:     ${response.errorMessage}${RESET}`);
   if (response.timestamp) meta.push(`  timestamp: ${new Date(response.timestamp).toISOString()}`);
-  console.log(meta.join("\n"));
+  out(meta.join("\n"));
 
   // Usage / tokens
   if (response.usage) {
@@ -194,7 +223,7 @@ export function logLLMOutput(response: {
       lines.push(`  cost cache write: $${u.cost.cacheWrite.toFixed(6)}`);
       lines.push(`  ${BOLD}cost total:         $${u.cost.total.toFixed(6)}${RESET}`);
     }
-    console.log(lines.join("\n"));
+    out(lines.join("\n"));
   }
 
   // Content blocks — full, no truncation
@@ -205,14 +234,14 @@ export function logLLMOutput(response: {
 
     if ("text" in block && block.text) {
       debugSub(C.white, `[${i}] text`, `${block.text.length} chars`);
-      console.log(block.text);
+      out(block.text);
     } else if ("name" in block) {
       const argsStr = JSON.stringify(block.arguments, null, 2);
       debugSub(C.yellow, `[${i}] toolCall: ${block.name}`, `id=${block.id || "?"}`);
-      console.log(argsStr);
+      out(argsStr);
     } else if ("thinking" in block && block.thinking) {
       debugSub(C.gray, `[${i}] thinking`, `${block.thinking.length} chars`);
-      console.log(block.thinking);
+      out(block.thinking);
     }
   }
 
@@ -225,7 +254,7 @@ export function logToolResultDebug(toolName: string, toolCallId: string, result:
   if (!debugEnabled) return;
   const color = isError ? C.red : C.gray;
   debugSub(color, `TOOL RESULT: ${toolName}`, `id=${toolCallId}, ${result.length} chars${isError ? " [ERROR]" : ""}`);
-  console.log(result);
+  out(result);
 }
 
 export function logError(message: string): void {
@@ -238,9 +267,9 @@ export function logTool(name: string, args?: Record<string, unknown>, reason?: s
   const argsStr = args ? ` ${formatArgs(args)}` : "";
   const toolPart = `${DIM}\x1b[37m${name}${argsStr}${RESET}`;
   if (reason) {
-    console.log(`${DIM}${timestamp}${RESET} ${color}[tool]${RESET} ${reason} ${DIM}—${RESET} ${toolPart}`);
+    out(`${DIM}${timestamp}${RESET} ${color}[tool]${RESET} ${reason} ${DIM}—${RESET} ${toolPart}`);
   } else {
-    console.log(`${DIM}${timestamp}${RESET} ${color}[tool]${RESET} ${toolPart}`);
+    out(`${DIM}${timestamp}${RESET} ${color}[tool]${RESET} ${toolPart}`);
   }
 }
 
@@ -248,7 +277,7 @@ export function logAgent(text: string): void {
   log("agent", text);
 }
 
-const REDACTED_KEYS = new Set(["password", "token", "secret", "api_key"]);
+const REDACTED_KEYS = new Set(["password", "token", "secret", "api_key", "registration_code"]);
 
 function formatArgs(args: Record<string, unknown>): string {
   const parts: string[] = [];

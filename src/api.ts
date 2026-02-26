@@ -17,7 +17,7 @@ export interface ApiResponse {
 const DEFAULT_BASE_URL = "https://game.spacemolt.com/api/v1";
 const MAX_RECONNECT_ATTEMPTS = 6;
 const RECONNECT_BASE_DELAY = 5_000; // 5s, 10s, 20s, 40s, 80s, 160s
-const VERSION = "0.2.11";
+const VERSION = "0.3.0";
 const USER_AGENT = `SpaceMolt-Commander/${VERSION}`;
 
 export class SpaceMoltAPI {

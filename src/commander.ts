@@ -7,7 +7,7 @@ import { SessionManager } from "./session.js";
 import { allTools } from "./tools.js";
 import { fetchGameCommands, formatCommandList } from "./schema.js";
 import { runAgentTurn, generateSessionHandoff, type CompactionState } from "./loop.js";
-import { log, logError, setDebug, logNotifications, formatNotifications } from "./ui.js";
+import { log, logError, setDebug, setSanitize, addSensitiveValue, logNotifications, formatNotifications } from "./ui.js";
 import { resolveProjectRoot } from "./paths.js";
 import DEFAULT_PROMPT from "../prompt.md" with { type: "text" };
 
@@ -30,7 +30,8 @@ Options:
   --url <url>      SpaceMolt API URL (default: production server)
   --file <path>    Read instruction from a file instead of command line
   --force-credentials  Allow overwriting existing credentials in this session
-  --debug          Show LLM call details (token counts, retries, etc.)
+  --debug, --verbose  Show LLM call details (token counts, retries, etc.)
+  --no-sanitize    Don't redact passwords/tokens from log output
 
 Examples:
   ./commander --model ollama/qwen3:8b "mine ore and sell it until you can buy a better ship"
@@ -56,6 +57,7 @@ interface CLIArgs {
   session: string;
   url?: string;
   debug: boolean;
+  noSanitize: boolean;
   forceCredentials: boolean;
   instruction: string;
 }
@@ -67,6 +69,7 @@ function parseArgs(argv: string[]): CLIArgs | null {
   let url: string | undefined;
   let file: string | undefined;
   let debug = false;
+  let noSanitize = false;
   let forceCredentials = false;
   const positional: string[] = [];
 
@@ -88,8 +91,13 @@ function parseArgs(argv: string[]): CLIArgs | null {
         file = args[++i] || undefined;
         break;
       case "--debug":
+      case "--verbose":
       case "-d":
+      case "-v":
         debug = true;
+        break;
+      case "--no-sanitize":
+        noSanitize = true;
         break;
       case "--force-credentials":
         forceCredentials = true;
@@ -124,7 +132,7 @@ function parseArgs(argv: string[]): CLIArgs | null {
     return null;
   }
 
-  return { model, session, url, debug, forceCredentials, instruction };
+  return { model, session, url, debug, noSanitize, forceCredentials, instruction };
 }
 
 // ─── System Prompt Builder ───────────────────────────────────
@@ -277,6 +285,7 @@ async function main(): Promise<void> {
   if (!cliArgs) process.exit(1);
 
   if (cliArgs.debug) setDebug(true);
+  if (cliArgs.noSanitize) setSanitize(false);
 
   log("setup", `SpaceMolt AI Commander starting...`);
   log("setup", `Model: ${cliArgs.model}`);
@@ -295,6 +304,7 @@ async function main(): Promise<void> {
 
   // Resolve model
   const { model, apiKey } = resolveModel(cliArgs.model);
+  if (apiKey) addSensitiveValue(apiKey);
 
   // Create session manager
   const sessionMgr = new SessionManager(cliArgs.session, PROJECT_ROOT, cliArgs.forceCredentials);
@@ -307,6 +317,7 @@ async function main(): Promise<void> {
   let credentialsPrompt: string;
   if (creds) {
     log("setup", `Found credentials for ${creds.username} (${creds.empire})`);
+    addSensitiveValue(creds.password);
     api.setCredentials(creds.username, creds.password);
     credentialsPrompt = [
       `- Username: ${creds.username}`,
@@ -423,6 +434,7 @@ async function main(): Promise<void> {
     const freshTodo = sessionMgr.loadTodo();
     let freshCredsPrompt: string;
     if (freshCreds) {
+      addSensitiveValue(freshCreds.password);
       freshCredsPrompt = [
         `- Username: ${freshCreds.username}`,
         `- Empire: ${freshCreds.empire}`,
