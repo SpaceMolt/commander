@@ -9,6 +9,7 @@ import { fetchGameCommands, formatCommandList } from "./schema.js";
 import { runAgentTurn, generateSessionHandoff, type CompactionState } from "./loop.js";
 import { log, logError, setDebug, setSanitize, addSensitiveValue, logNotifications, formatNotifications } from "./ui.js";
 import { resolveProjectRoot } from "./paths.js";
+import { initBenchmark, isBenchmarkEnabled, setCurrentTick, getCurrentTick, emitTurnEnd, emitScenarioEnd, resetTurnStats } from "./benchmark.js";
 import DEFAULT_PROMPT from "../prompt.md" with { type: "text" };
 
 // Resolve project root safely. In compiled binaries on Windows, Bun.main may
@@ -32,6 +33,12 @@ Options:
   --force-credentials  Allow overwriting existing credentials in this session
   --debug, --verbose  Show LLM call details (token counts, retries, etc.)
   --no-sanitize    Don't redact passwords/tokens from log output
+
+Benchmark options:
+  --benchmark      Emit JSONL telemetry events to stdout (one per tool/LLM call)
+  --max-ticks <N>  Hard stop after N game ticks (agent exits with summary)
+  --scenario <path>  Load scenario instruction file instead of --instruction
+  --openrouter     Route all LLM calls through OpenRouter (prepends "openrouter/")
 
 Examples:
   ./commander --model ollama/qwen3:8b "mine ore and sell it until you can buy a better ship"
@@ -60,6 +67,10 @@ interface CLIArgs {
   noSanitize: boolean;
   forceCredentials: boolean;
   instruction: string;
+  benchmark: boolean;
+  maxTicks: number;
+  scenario?: string;
+  openrouter: boolean;
 }
 
 function parseArgs(argv: string[]): CLIArgs | null {
@@ -71,6 +82,10 @@ function parseArgs(argv: string[]): CLIArgs | null {
   let debug = false;
   let noSanitize = false;
   let forceCredentials = false;
+  let benchmark = false;
+  let maxTicks = 0;
+  let scenario: string | undefined;
+  let openrouter = false;
   const positional: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
@@ -102,6 +117,18 @@ function parseArgs(argv: string[]): CLIArgs | null {
       case "--force-credentials":
         forceCredentials = true;
         break;
+      case "--benchmark":
+        benchmark = true;
+        break;
+      case "--max-ticks":
+        maxTicks = parseInt(args[++i] || "0", 10);
+        break;
+      case "--scenario":
+        scenario = args[++i] || undefined;
+        break;
+      case "--openrouter":
+        openrouter = true;
+        break;
       case "--help":
       case "-h":
         printUsage();
@@ -118,7 +145,14 @@ function parseArgs(argv: string[]): CLIArgs | null {
   }
 
   let instruction = positional.join(" ");
-  if (file) {
+  if (scenario) {
+    try {
+      instruction = readFileSync(scenario, "utf-8").trim();
+    } catch (err) {
+      logError(`Could not read scenario file: ${scenario}`);
+      return null;
+    }
+  } else if (file) {
     try {
       instruction = readFileSync(file, "utf-8").trim();
     } catch (err) {
@@ -127,12 +161,17 @@ function parseArgs(argv: string[]): CLIArgs | null {
     }
   }
   if (!instruction) {
-    logError("Missing instruction — provide as argument or use --file <path>");
+    logError("Missing instruction — provide as argument or use --file <path> or --scenario <path>");
     printUsage();
     return null;
   }
 
-  return { model, session, url, debug, noSanitize, forceCredentials, instruction };
+  // Prepend openrouter/ to model if --openrouter is set and not already prefixed
+  if (openrouter && !model.startsWith("openrouter/")) {
+    model = "openrouter/" + model;
+  }
+
+  return { model, session, url, debug, noSanitize, forceCredentials, instruction, benchmark, maxTicks, scenario, openrouter };
 }
 
 // ─── System Prompt Builder ───────────────────────────────────
@@ -286,9 +325,12 @@ async function main(): Promise<void> {
 
   if (cliArgs.debug) setDebug(true);
   if (cliArgs.noSanitize) setSanitize(false);
+  initBenchmark(cliArgs.benchmark);
 
   log("setup", `SpaceMolt AI Commander starting...`);
   log("setup", `Model: ${cliArgs.model}`);
+  if (cliArgs.benchmark) log("setup", "BENCHMARK MODE enabled");
+  if (cliArgs.maxTicks > 0) log("setup", `Max ticks: ${cliArgs.maxTicks}`);
   log("setup", `Session: ${cliArgs.session}`);
   log("setup", `Instruction: ${cliArgs.instruction}`);
 
@@ -329,7 +371,24 @@ async function main(): Promise<void> {
     ].join("\n");
   } else {
     log("setup", "No credentials found — agent will need to register");
-    credentialsPrompt = "New player — you need to register first. You'll need a registration code from spacemolt.com/dashboard. Pick a creative username and empire, pass your registration_code, then IMMEDIATELY save_credentials.";
+    credentialsPrompt = [
+      "New player — you MUST register before doing anything else.",
+      "",
+      "## Registration Steps",
+      "1. Pick a creative username (3-24 characters)",
+      "2. Choose an empire based on your mission:",
+      "   - **solarian** — balanced bonuses, good for mining/trading",
+      "   - **nebula** — large cargo bonus, good for traders/haulers",
+      "   - **crimson** — weapon damage bonus, good for combat",
+      "   - **voidborn** — shield bonus, good for defense/stealth",
+      "   - **outerrim** — speed bonus, good for exploration",
+      "3. Use ANY string as your registration_code (e.g. \"benchmark\")",
+      "4. Call the register command with ALL THREE fields:",
+      "   register(username=\"YourName\", empire=\"solarian\", registration_code=\"benchmark\")",
+      "5. IMMEDIATELY call save_credentials after registering — your password cannot be recovered otherwise!",
+      "",
+      "IMPORTANT: Do NOT call login — you have no account yet. Do NOT call other commands before registering.",
+    ].join("\n");
   }
 
   // Load TODO
@@ -387,14 +446,17 @@ async function main(): Promise<void> {
   const compaction: CompactionState = { summary: "" };
 
   while (running) {
+    resetTurnStats();
     try {
       await runAgentTurn(model, context, api, sessionMgr, {
         signal: abortController.signal,
         apiKey,
       }, compaction);
+      if (isBenchmarkEnabled()) emitTurnEnd("turn_complete");
     } catch (err) {
       if (abortController.signal.aborted) break;
       logError(`Turn error: ${err instanceof Error ? err.message : String(err)}`);
+      if (isBenchmarkEnabled()) emitTurnEnd("error");
     }
 
     if (!running) break;
@@ -412,8 +474,36 @@ async function main(): Promise<void> {
         logNotifications(pollResp.notifications);
         pendingEvents = formatNotifications(pollResp.notifications);
       }
+      // Track tick for benchmark from server response metadata
+      // The health endpoint includes "tick" in its response
+      if (isBenchmarkEnabled()) {
+        try {
+          const healthResp = await fetch(api.baseUrl.replace("/api/v1", "/healthz"));
+          const healthData = await healthResp.json() as { tick?: number };
+          if (typeof healthData.tick === "number") setCurrentTick(healthData.tick);
+        } catch {
+          // Best-effort tick tracking
+        }
+      }
     } catch {
       // Polling is best-effort; don't break the loop
+    }
+
+    // Check max-ticks limit
+    if (cliArgs.maxTicks > 0 && getCurrentTick() >= cliArgs.maxTicks) {
+      log("system", `Reached max ticks (${cliArgs.maxTicks}), ending benchmark`);
+      if (isBenchmarkEnabled()) {
+        // Fetch final state for scenario end event
+        try {
+          const finalResp = await api.execute("get_status");
+          const finalState = finalResp.result as Record<string, unknown> || {};
+          emitScenarioEnd("max_ticks", finalState);
+        } catch {
+          emitScenarioEnd("max_ticks", {});
+        }
+      }
+      running = false;
+      break;
     }
 
     // Add a continuation nudge so the LLM always has a user message to respond to.

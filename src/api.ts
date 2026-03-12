@@ -14,7 +14,7 @@ export interface ApiResponse {
   error?: { code: string; message: string; wait_seconds?: number } | null;
 }
 
-const DEFAULT_BASE_URL = "https://game.spacemolt.com/api/v1";
+const DEFAULT_BASE_URL = "https://game.spacemolt.com/api/v2";
 const MAX_RECONNECT_ATTEMPTS = 6;
 const RECONNECT_BASE_DELAY = 5_000; // 5s, 10s, 20s, 40s, 80s, 160s
 const VERSION = "0.3.0";
