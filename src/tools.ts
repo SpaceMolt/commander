@@ -97,7 +97,9 @@ export async function executeTool(
       return `Error: [${resp.error.code}] ${resp.error.message}`;
     }
 
-    return truncateResult(formatToolResult(command, resp.result, resp.notifications));
+    // v2 API returns text in `result` and JSON in `structuredContent`
+    const displayResult = resp.result;
+    return truncateResult(formatToolResult(command, displayResult, resp.notifications));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return `Error executing ${command}: ${msg}`;

@@ -166,7 +166,8 @@ ${serverInfo}
 
   prompt += `
 ## Available Game Commands
-Use the "game" tool with a command name and args. Example: game(command="mine", args={})
+Use the "game" tool with a command name and args. Example: game(command="spacemolt/mine", args={})
+Commands use the format "tool/action" (e.g. "spacemolt/travel", "spacemolt_auth/login", "spacemolt_social/chat").
 ${commandList}
 
 ## Your TODO List
@@ -241,10 +242,17 @@ async function fetchInitialServerInfo(api: SpaceMoltAPI): Promise<string> {
   const parts: string[] = [];
 
   // Fetch status (triggers session creation + auto-login)
+  // v2 API returns human-readable text in `result` and raw JSON in `structuredContent`
   try {
-    const statusResp = await api.execute("get_status");
+    const statusResp = await api.execute("spacemolt/get_status");
     if (!statusResp.error && statusResp.result) {
-      parts.push("Ship Status:\n" + formatStatusMarkdown(statusResp.result as Record<string, unknown>));
+      if (typeof statusResp.result === "string") {
+        // v2: result is already formatted text
+        parts.push("Ship Status:\n" + statusResp.result);
+      } else {
+        // v1 fallback: result is JSON
+        parts.push("Ship Status:\n" + formatStatusMarkdown(statusResp.result as Record<string, unknown>));
+      }
     }
   } catch {
     // Non-fatal — agent can query status itself
@@ -252,11 +260,16 @@ async function fetchInitialServerInfo(api: SpaceMoltAPI): Promise<string> {
 
   // Fetch most recent captain's log entry only
   try {
-    const logResp = await api.execute("captains_log_get", { index: 0 });
+    const logResp = await api.execute("spacemolt_social/captains_log_get", { index: 0 });
     if (!logResp.error && logResp.result) {
-      const entry = logResp.result as Record<string, unknown>;
-      if (entry.entry) {
-        parts.push(`Last Captain's Log (${entry.created_at || "unknown date"}):\n${entry.entry}`);
+      if (typeof logResp.result === "string") {
+        // v2: already formatted
+        parts.push(logResp.result);
+      } else {
+        const entry = logResp.result as Record<string, unknown>;
+        if (entry.entry) {
+          parts.push(`Last Captain's Log (${entry.created_at || "unknown date"}):\n${entry.entry}`);
+        }
       }
     }
   } catch {
@@ -265,11 +278,16 @@ async function fetchInitialServerInfo(api: SpaceMoltAPI): Promise<string> {
 
   // Fetch version/release notes
   try {
-    const versionResp = await api.execute("get_version");
+    const versionResp = await api.execute("spacemolt/get_version");
     if (!versionResp.error && versionResp.result) {
-      const v = versionResp.result as Record<string, unknown>;
-      const notes = Array.isArray(v.notes) ? v.notes.map((n: string) => `- ${n}`).join("\n") : "";
-      parts.push(`Game v${v.version || "?"} (${v.release_date || "?"})\n${notes}`);
+      if (typeof versionResp.result === "string") {
+        // v2: already formatted
+        parts.push(versionResp.result);
+      } else {
+        const v = versionResp.result as Record<string, unknown>;
+        const notes = Array.isArray(v.notes) ? v.notes.map((n: string) => `- ${n}`).join("\n") : "";
+        parts.push(`Game v${v.version || "?"} (${v.release_date || "?"})\n${notes}`);
+      }
     }
   } catch {
     // Non-fatal
@@ -407,7 +425,7 @@ async function main(): Promise<void> {
     // and always returns piggybacked notifications.
     let pendingEvents = "";
     try {
-      const pollResp = await api.execute("get_status");
+      const pollResp = await api.execute("spacemolt/get_status");
       if (pollResp.notifications && Array.isArray(pollResp.notifications) && pollResp.notifications.length > 0) {
         logNotifications(pollResp.notifications);
         pendingEvents = formatNotifications(pollResp.notifications);
@@ -463,8 +481,8 @@ async function main(): Promise<void> {
 
       // Persist to captain's log (server-side, survives across sessions)
       try {
-        await api.execute("captains_log_add", {
-          entry: `[Session Handoff] ${handoff}`,
+        await api.execute("spacemolt_social/captains_log_add", {
+          content: `[Session Handoff] ${handoff}`,
         });
         log("system", "Handoff saved to captain's log");
       } catch {

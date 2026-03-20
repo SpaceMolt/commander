@@ -9,12 +9,13 @@ export interface ApiSession {
 
 export interface ApiResponse {
   result?: unknown;
+  structuredContent?: unknown;
   notifications?: unknown[];
   session?: ApiSession;
   error?: { code: string; message: string; wait_seconds?: number } | null;
 }
 
-const DEFAULT_BASE_URL = "https://game.spacemolt.com/api/v1";
+const DEFAULT_BASE_URL = "https://game.spacemolt.com/api/v2";
 const MAX_RECONNECT_ATTEMPTS = 6;
 const RECONNECT_BASE_DELAY = 5_000; // 5s, 10s, 20s, 40s, 80s, 160s
 const VERSION = "0.3.0";
@@ -115,7 +116,7 @@ export class SpaceMoltAPI {
         // Re-authenticate if we have credentials
         if (this.credentials) {
           log("system", `Logging in as ${this.credentials.username}...`);
-          const loginResp = await this.doRequest("login", {
+          const loginResp = await this.doRequest("spacemolt_auth/login", {
             username: this.credentials.username,
             password: this.credentials.password,
           });
