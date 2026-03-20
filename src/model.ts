@@ -1,5 +1,6 @@
 import { getModel, getModels, getProviders } from "@mariozechner/pi-ai";
 import type { Model, KnownProvider } from "@mariozechner/pi-ai";
+import { readFileSync } from "fs";
 import { log } from "./ui.js";
 
 interface ParsedModel {
@@ -137,8 +138,22 @@ export function resolveModel(modelStr: string): { model: Model<any>; apiKey?: st
 
 function getApiKey(provider: string): string | undefined {
   const envVar = API_KEY_ENV[provider];
-  if (envVar) return process.env[envVar];
+  if (envVar && process.env[envVar]) return process.env[envVar];
   // Generic fallback
   const genericKey = process.env[`${provider.toUpperCase()}_API_KEY`];
-  return genericKey || undefined;
+  if (genericKey) return genericKey;
+  // File-based fallback for sandboxed environments (e.g. nono) where env vars
+  // are stripped from child processes.
+  if (envVar) {
+    try {
+      const keyName = envVar.toLowerCase().replace(/_/g, "-");
+      for (const p of [`/private/tmp/.smbench-${keyName}`, `/tmp/.smbench-${keyName}`]) {
+        try {
+          const key = readFileSync(p, "utf-8").trim();
+          if (key) return key;
+        } catch { /* not found */ }
+      }
+    } catch { /* no fs */ }
+  }
+  return undefined;
 }
