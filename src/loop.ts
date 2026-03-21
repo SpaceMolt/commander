@@ -4,6 +4,7 @@ import type { SpaceMoltAPI } from "./api.js";
 import type { SessionManager } from "./session.js";
 import { executeTool } from "./tools.js";
 import { log, logAgent, logDebug, logError, logLLMInput, logLLMOutput, logLLMPayload, logToolResultDebug, isDebug } from "./ui.js";
+import { emitEvent, trackTokens, getCumulativeTokens, isBenchmarkMode } from "./benchmark.js";
 
 const MAX_TOOL_ROUNDS = 30;
 const MAX_RETRIES = 3;
@@ -110,6 +111,11 @@ export async function runAgentTurn(
       showedReason = true;
       const result = await executeTool(toolCall.name, toolCall.arguments, api, session, callReason);
       const isError = result.startsWith("Error");
+
+      emitEvent(isError ? "tool_error" : "tool_call", {
+        tool: toolCall.name,
+        args: toolCall.arguments,
+      });
 
       logToolResultDebug(toolCall.name, toolCall.id, result, isError);
 
@@ -363,6 +369,9 @@ async function completeWithRetry(
 
         logLLMOutput(result);
         logDebug(`LLM responded: ${result.content.length} blocks, stop=${result.stopReason}, tokens=${result.usage?.totalTokens ?? "?"}`);
+        if (isBenchmarkMode() && result.usage) {
+          trackTokens(result.usage.input || 0, result.usage.output || 0);
+        }
         return result;
       } catch (err) {
         clearTimeout(timeout);

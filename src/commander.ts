@@ -7,7 +7,8 @@ import { SessionManager } from "./session.js";
 import { allTools } from "./tools.js";
 import { fetchGameCommands, formatCommandList } from "./schema.js";
 import { runAgentTurn, generateSessionHandoff, type CompactionState } from "./loop.js";
-import { log, logError, setDebug, setSanitize, addSensitiveValue, logNotifications, formatNotifications } from "./ui.js";
+import { setBenchmarkMode, emitEvent, getCumulativeTokens, isBenchmarkMode } from "./benchmark.js";
+import { log, logError, setDebug, setSanitize, setBenchmarkOutput, addSensitiveValue, logNotifications, formatNotifications } from "./ui.js";
 import { resolveProjectRoot } from "./paths.js";
 import DEFAULT_PROMPT from "../prompt.md" with { type: "text" };
 
@@ -59,6 +60,7 @@ interface CLIArgs {
   debug: boolean;
   noSanitize: boolean;
   forceCredentials: boolean;
+  benchmark: boolean;
   instruction: string;
 }
 
@@ -71,6 +73,7 @@ function parseArgs(argv: string[]): CLIArgs | null {
   let debug = false;
   let noSanitize = false;
   let forceCredentials = false;
+  let benchmark = false;
   const positional: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
@@ -102,6 +105,9 @@ function parseArgs(argv: string[]): CLIArgs | null {
       case "--force-credentials":
         forceCredentials = true;
         break;
+      case "--benchmark":
+        benchmark = true;
+        break;
       case "--help":
       case "-h":
         printUsage();
@@ -132,7 +138,7 @@ function parseArgs(argv: string[]): CLIArgs | null {
     return null;
   }
 
-  return { model, session, url, debug, noSanitize, forceCredentials, instruction };
+  return { model, session, url, debug, noSanitize, forceCredentials, benchmark, instruction };
 }
 
 // ─── System Prompt Builder ───────────────────────────────────
@@ -304,6 +310,10 @@ async function main(): Promise<void> {
 
   if (cliArgs.debug) setDebug(true);
   if (cliArgs.noSanitize) setSanitize(false);
+  if (cliArgs.benchmark) {
+    setBenchmarkMode(true);
+    setBenchmarkOutput(true);
+  }
 
   log("setup", `SpaceMolt AI Commander starting...`);
   log("setup", `Model: ${cliArgs.model}`);
@@ -347,7 +357,11 @@ async function main(): Promise<void> {
     ].join("\n");
   } else {
     log("setup", "No credentials found — agent will need to register");
-    credentialsPrompt = "New player — you need to register first. You'll need a registration code from spacemolt.com/dashboard. Pick a creative username and empire, pass your registration_code, then IMMEDIATELY save_credentials.";
+    if (isBenchmarkMode()) {
+      credentialsPrompt = "New player — register now. No registration code needed. Pick a creative username and any empire (solarian, voidborn, crimson, nebula, outerrim), then IMMEDIATELY save_credentials.";
+    } else {
+      credentialsPrompt = "New player — you need to register first. You'll need a registration code from spacemolt.com/dashboard. Pick a creative username and empire, pass your registration_code, then IMMEDIATELY save_credentials.";
+    }
   }
 
   // Load TODO
@@ -410,6 +424,7 @@ async function main(): Promise<void> {
         signal: abortController.signal,
         apiKey,
       }, compaction);
+      emitEvent("turn_end", getCumulativeTokens());
     } catch (err) {
       if (abortController.signal.aborted) break;
       logError(`Turn error: ${err instanceof Error ? err.message : String(err)}`);

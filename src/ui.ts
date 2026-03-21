@@ -24,6 +24,7 @@ const DIM = "\x1b[2m";
 
 let debugEnabled = false;
 let sanitizeEnabled = true;
+let benchmarkMode = false;
 const sensitiveValues = new Set<string>();
 
 export function setDebug(enabled: boolean): void {
@@ -32,6 +33,10 @@ export function setDebug(enabled: boolean): void {
 
 export function setSanitize(enabled: boolean): void {
   sanitizeEnabled = enabled;
+}
+
+export function setBenchmarkOutput(enabled: boolean): void {
+  benchmarkMode = enabled;
 }
 
 export function addSensitiveValue(value: string): void {
@@ -54,7 +59,12 @@ function sanitize(text: string): string {
 /** Sanitization-aware console.log wrapper. */
 function out(...args: unknown[]): void {
   const sanitized = args.map(a => typeof a === "string" ? sanitize(a) : a);
-  console.log(...sanitized);
+  // In benchmark mode, use stderr so stdout is reserved for JSONL events
+  if (benchmarkMode) {
+    console.error(...sanitized);
+  } else {
+    console.log(...sanitized);
+  }
 }
 
 export function log(category: string, message: string): void {
