@@ -14,6 +14,10 @@ const COLORS: Record<string, string> = {
   craft: "\x1b[32m",    // green
   faction: "\x1b[35m",  // magenta
   mission: "\x1b[36m",  // cyan
+  explore: "\x1b[94m",   // bright blue
+  salvage: "\x1b[33m",   // yellow
+  fleet: "\x1b[35m",     // magenta
+  insurance: "\x1b[37m", // white
   broadcast: "\x1b[91m", // bright red (admin broadcasts)
   dm: "\x1b[95m",        // bright magenta (private messages)
 };

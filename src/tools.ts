@@ -41,7 +41,7 @@ export const allTools: Tool[] = [
     name: "status_log",
     description: "Log a status message visible to the human watching.",
     parameters: Type.Object({
-      category: StringEnum(["mining", "travel", "combat", "trade", "chat", "info", "craft", "faction", "mission", "setup"], {
+      category: StringEnum(["mining", "travel", "combat", "trade", "chat", "info", "craft", "faction", "mission", "setup", "explore", "salvage", "fleet", "insurance"], {
         description: "Message category",
       }),
       message: Type.String({ description: "Status message" }),
