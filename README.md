@@ -108,6 +108,9 @@ Environment:
   OPENAI_COMPAT_BASE_URL Custom OpenAI-compatible endpoint URL
   OPENAI_COMPAT_API_KEY  API key for custom endpoint
   SPACEMOLT_URL          Override game server URL
+  FILTER_NOTIFICATIONS   Comma-separated notification categories to hide from the LLM
+                         (default: none). Valid: chat, dm, broadcast, combat, trade, info, system.
+                         Example: FILTER_NOTIFICATIONS=chat,trade. Filtered notifications still appear in terminal output.
 ```
 
 ## Supported Models
