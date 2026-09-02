@@ -51,6 +51,15 @@ describe("resolveProjectRoot", () => {
     expect(result).toBe("/home/user/commander");
   });
 
+  test("uses Windows path semantics for a Windows source path", () => {
+    const result = resolveProjectRoot(
+      "C:\\Users\\pilot\\commander\\src\\commander.ts",
+      "C:\\Program Files\\Bun\\bun.exe",
+      "C:\\Users\\pilot"
+    );
+    expect(result).toBe("C:\\Users\\pilot\\commander");
+  });
+
   test("uses execPath for compiled binary", () => {
     const result = resolveProjectRoot(
       "/internal/bundle",  // Bun.main in compiled binary (not .ts/.js)
@@ -58,6 +67,15 @@ describe("resolveProjectRoot", () => {
       "/home/user"
     );
     expect(result).toBe("/home/user/commander");
+  });
+
+  test("uses execPath for a compiled Windows binary", () => {
+    const result = resolveProjectRoot(
+      "/internal/bundle",
+      "C:\\Users\\pilot\\commander\\commander-windows-x64.exe",
+      "C:\\Users\\pilot"
+    );
+    expect(result).toBe("C:\\Users\\pilot\\commander");
   });
 
   test("BUG REPRO: does NOT return root when Bun.main is '/' in compiled binary", () => {

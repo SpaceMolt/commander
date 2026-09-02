@@ -1,4 +1,14 @@
-import { dirname, resolve, parse } from "path";
+import * as path from "path";
+
+function pathModuleFor(candidate: string): typeof path.posix {
+  if (/^[A-Za-z]:[\\/]/.test(candidate) || candidate.startsWith("\\")) {
+    return path.win32;
+  }
+  if (candidate.startsWith("/")) {
+    return path.posix;
+  }
+  return path;
+}
 
 /**
  * Resolve the project root directory.
@@ -15,7 +25,8 @@ export function resolveProjectRoot(bunMain: string, execPath: string, cwd: strin
   const isSource = bunMain.endsWith(".ts") || bunMain.endsWith(".js");
 
   if (isSource) {
-    return dirname(dirname(bunMain));
+    const pathModule = pathModuleFor(bunMain);
+    return pathModule.dirname(pathModule.dirname(bunMain));
   }
 
   // Compiled binary: prefer process.execPath over Bun.main since Bun.main
@@ -23,7 +34,8 @@ export function resolveProjectRoot(bunMain: string, execPath: string, cwd: strin
   // Try execPath first, then bunMain, then fall back to cwd.
   for (const candidate of [execPath, bunMain]) {
     if (candidate) {
-      const dir = dirname(resolve(candidate));
+      const pathModule = pathModuleFor(candidate);
+      const dir = pathModule.dirname(pathModule.resolve(candidate));
       // Sanity check: reject root-only paths (e.g. "/" or "\" or "C:\")
       if (!isRootPath(dir)) {
         return dir;
@@ -54,8 +66,8 @@ export function isRootPath(p: string): boolean {
   // Windows drive root: "C:" or "D:" (after stripping trailing separator)
   if (/^[A-Za-z]:$/.test(normalized)) return true;
 
-  // Use path.parse as additional check (works for the native platform)
-  const parsed = parse(p);
+  // Use the matching path flavor as an additional structural check.
+  const parsed = pathModuleFor(p).parse(p);
   if (parsed.base === "" || p === parsed.root) return true;
 
   return false;
